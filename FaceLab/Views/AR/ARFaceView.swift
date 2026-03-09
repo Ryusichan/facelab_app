@@ -1,166 +1,139 @@
 import SwiftUI
 import ARKit
-import RealityKit
+import SceneKit
 
+// ============================================================
+// MARK: - ARFaceView
+// 얼굴 스캔 프리뷰 탭 (메이크업 없이 순수 face mesh 표시)
+// 메이크업 기능은 MakeupStudioView에 있음
+// ============================================================
 struct ARFaceView: View {
-    @StateObject private var arViewModel = ARFaceViewModel()
+    @StateObject private var viewModel = ARFaceViewModel()
 
     var body: some View {
         NavigationStack {
             ZStack {
-                ARFaceContainerView(arViewModel: arViewModel)
+                // ARSCNView face tracking
+                ARFaceSceneView(viewModel: viewModel)
                     .ignoresSafeArea()
 
-                VStack {
-                    Spacer()
-
-                    HStack(spacing: 16) {
-                        Button {
-                            arViewModel.captureSnapshot()
-                        } label: {
-                            Image(systemName: "camera.circle.fill")
-                                .font(.system(size: 64))
-                                .foregroundStyle(.white)
-                                .shadow(radius: 4)
-                        }
-                    }
-                    .padding(.bottom, 40)
-                }
-
-                if !arViewModel.isFaceDetected {
+                // 얼굴 미감지 안내
+                if !viewModel.isFaceDetected {
                     VStack {
-                        Text("Position your face in the frame")
-                            .font(.headline)
-                            .padding()
-                            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+                        Text("얼굴을 카메라 안에 위치해주세요")
+                            .font(.callout)
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 20)
+                            .padding(.vertical, 10)
+                            .background(.black.opacity(0.55), in: Capsule())
+                            .padding(.top, 20)
                         Spacer()
                     }
-                    .padding(.top, 100)
+                }
+
+                // 하단 캡처 버튼
+                VStack {
+                    Spacer()
+                    Button {
+                        viewModel.captureSnapshot()
+                    } label: {
+                        Image(systemName: "camera.circle.fill")
+                            .font(.system(size: 64))
+                            .foregroundStyle(.white)
+                            .shadow(radius: 4)
+                    }
+                    .padding(.bottom, 44)
                 }
             }
-            .navigationTitle("Face Scan")
+            .navigationTitle("Face Preview")
             .navigationBarTitleDisplayMode(.inline)
         }
     }
 }
 
-// MARK: - AR Container (UIViewRepresentable)
-struct ARFaceContainerView: UIViewRepresentable {
-    @ObservedObject var arViewModel: ARFaceViewModel
+// ============================================================
+// MARK: - ARFaceSceneView (UIViewRepresentable)
+// 투명 mesh overlay로 얼굴 3D 구조 표시
+// ============================================================
+struct ARFaceSceneView: UIViewRepresentable {
+    @ObservedObject var viewModel: ARFaceViewModel
 
-    func makeUIView(context: Context) -> ARView {
-        let arView = ARView(frame: .zero)
+    func makeUIView(context: Context) -> ARSCNView {
+        let sceneView = ARSCNView(frame: .zero)
+        sceneView.delegate = context.coordinator
+        sceneView.automaticallyUpdatesLighting = true
 
-        // Configure face tracking
         let config = ARFaceTrackingConfiguration()
         config.maximumNumberOfTrackedFaces = 1
         config.isLightEstimationEnabled = true
+        sceneView.session.run(config, options: [.resetTracking, .removeExistingAnchors])
 
-        arView.session.delegate = context.coordinator
-        arView.session.run(config, options: [.resetTracking, .removeExistingAnchors])
-
-        arViewModel.arView = arView
-        return arView
+        viewModel.sceneView = sceneView
+        context.coordinator.viewModel = viewModel
+        return sceneView
     }
 
-    func updateUIView(_ uiView: ARView, context: Context) {}
+    func updateUIView(_ uiView: ARSCNView, context: Context) {}
 
-    func makeCoordinator() -> ARSessionCoordinator {
-        ARSessionCoordinator(arViewModel: arViewModel)
-    }
-}
-
-// MARK: - AR Session Coordinator
-class ARSessionCoordinator: NSObject, ARSessionDelegate {
-    let arViewModel: ARFaceViewModel
-
-    init(arViewModel: ARFaceViewModel) {
-        self.arViewModel = arViewModel
-    }
-
-    func session(_ session: ARSession, didAdd anchors: [ARAnchor]) {
-        for anchor in anchors {
-            guard let faceAnchor = anchor as? ARFaceAnchor else { continue }
-            DispatchQueue.main.async {
-                self.arViewModel.isFaceDetected = true
-                self.arViewModel.addFaceMesh(for: faceAnchor)
-            }
-        }
-    }
-
-    func session(_ session: ARSession, didUpdate anchors: [ARAnchor]) {
-        for anchor in anchors {
-            guard let faceAnchor = anchor as? ARFaceAnchor else { continue }
-            DispatchQueue.main.async {
-                self.arViewModel.updateFaceMesh(for: faceAnchor)
-            }
-        }
-    }
-
-    func session(_ session: ARSession, didRemove anchors: [ARAnchor]) {
-        for anchor in anchors {
-            guard anchor is ARFaceAnchor else { continue }
-            DispatchQueue.main.async {
-                self.arViewModel.isFaceDetected = false
-            }
-        }
+    func makeCoordinator() -> ARFaceCoordinator {
+        ARFaceCoordinator()
     }
 }
 
-// MARK: - ViewModel
+// ============================================================
+// MARK: - ARFaceCoordinator
+// ============================================================
+class ARFaceCoordinator: NSObject, ARSCNViewDelegate {
+    weak var viewModel: ARFaceViewModel?
+    private var faceGeometry: ARSCNFaceGeometry?
+
+    func renderer(_ renderer: SCNSceneRenderer, nodeFor anchor: ARAnchor) -> SCNNode? {
+        guard anchor is ARFaceAnchor,
+              let device = (renderer as? ARSCNView)?.device,
+              let faceGeo = ARSCNFaceGeometry(device: device) else { return nil }
+
+        // 와이어프레임 느낌의 반투명 mesh 표시
+        if let material = faceGeo.firstMaterial {
+            material.lightingModel = .constant
+            material.isDoubleSided = true
+            material.transparencyMode = .aOne
+            material.blendMode = .alpha
+            material.diffuse.contents = UIColor.white.withAlphaComponent(0.08)
+            material.emission.contents  = UIColor(red: 0.3, green: 0.9, blue: 1.0, alpha: 0.25)
+            material.writesToDepthBuffer = false
+        }
+
+        self.faceGeometry = faceGeo
+        DispatchQueue.main.async { self.viewModel?.isFaceDetected = true }
+        return SCNNode(geometry: faceGeo)
+    }
+
+    func renderer(_ renderer: SCNSceneRenderer, didUpdate node: SCNNode, for anchor: ARAnchor) {
+        guard let faceAnchor = anchor as? ARFaceAnchor else { return }
+        faceGeometry?.update(from: faceAnchor.geometry)
+    }
+
+    func renderer(_ renderer: SCNSceneRenderer, didRemove node: SCNNode, for anchor: ARAnchor) {
+        guard anchor is ARFaceAnchor else { return }
+        DispatchQueue.main.async { self.viewModel?.isFaceDetected = false }
+    }
+}
+
+// ============================================================
+// MARK: - ARFaceViewModel
+// ============================================================
 @MainActor
 class ARFaceViewModel: ObservableObject {
     @Published var isFaceDetected = false
     @Published var capturedImage: UIImage?
 
-    weak var arView: ARView?
-    private var faceEntity: ModelEntity?
-
-    func addFaceMesh(for faceAnchor: ARFaceAnchor) {
-        guard let arView else { return }
-
-        // Create face mesh from ARKit geometry
-        let faceGeometry = faceAnchor.geometry
-        var meshDescriptor = MeshDescriptor(name: "faceMesh")
-        meshDescriptor.positions = MeshBuffer(faceGeometry.vertices.map { SIMD3<Float>($0.0, $0.1, $0.2) })
-        meshDescriptor.primitives = .triangles(faceGeometry.triangleIndices.map { UInt32($0) })
-        meshDescriptor.textureCoordinates = MeshBuffer(faceGeometry.textureCoordinates.map { SIMD2<Float>($0.0, $0.1) })
-
-        guard let meshResource = try? MeshResource.generate(from: [meshDescriptor]) else { return }
-
-        // Semi-transparent skin-tone material (base layer for makeup)
-        var material = SimpleMaterial()
-        material.color = .init(tint: .clear)
-        material.metallic = 0
-        material.roughness = 1
-
-        let entity = ModelEntity(mesh: meshResource, materials: [material])
-        faceEntity = entity
-
-        let anchorEntity = AnchorEntity(anchor: faceAnchor)
-        anchorEntity.addChild(entity)
-        arView.scene.addAnchor(anchorEntity)
-    }
-
-    func updateFaceMesh(for faceAnchor: ARFaceAnchor) {
-        guard let faceEntity else { return }
-
-        let faceGeometry = faceAnchor.geometry
-        var meshDescriptor = MeshDescriptor(name: "faceMesh")
-        meshDescriptor.positions = MeshBuffer(faceGeometry.vertices.map { SIMD3<Float>($0.0, $0.1, $0.2) })
-        meshDescriptor.primitives = .triangles(faceGeometry.triangleIndices.map { UInt32($0) })
-        meshDescriptor.textureCoordinates = MeshBuffer(faceGeometry.textureCoordinates.map { SIMD2<Float>($0.0, $0.1) })
-
-        guard let meshResource = try? MeshResource.generate(from: [meshDescriptor]) else { return }
-        faceEntity.model?.mesh = meshResource
-    }
+    weak var sceneView: ARSCNView?
 
     func captureSnapshot() {
-        guard let arView else { return }
-        arView.snapshot(saveToHDR: false) { image in
-            DispatchQueue.main.async {
-                self.capturedImage = image
-            }
-        }
+        guard let sceneView else { return }
+        let image = sceneView.snapshot()
+        capturedImage = image
+        // TODO: Photos 저장 또는 Supabase 업로드 연동 포인트
+        UIImageWriteToSavedPhotosAlbum(image, nil, nil, nil)
     }
 }

@@ -40,5 +40,7 @@
 	<string>FaceLab uses the camera to scan your face and create a 3D model for virtual makeup application.</string>
 	<key>NSFaceTrackingUsageDescription</key>
 	<string>FaceLab uses face tracking to map makeup effects onto your face in real-time.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>FaceLab saves your makeup photos to your photo library.</string>
 </dict>
 </plist>
