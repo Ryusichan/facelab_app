@@ -7,15 +7,16 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		A1000001 /* FaceLabApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000001; };
-		A1000002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000002; };
-		A1000003 /* ARFaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000003; };
-		A1000004 /* MakeupStudioView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000004; };
-		A1000005 /* MakeupModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000005; };
-		A1000006 /* SupabaseService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000006; };
-		A1000007 /* AuthViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000007; };
-		A1000008 /* LoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000008; };
-		A1000009 /* Supabase.plist in Resources */ = {isa = PBXBuildFile; fileRef = B1000009; };
+		034535752F5F1EDB00481A40 /* Supabase in Frameworks */ = {isa = PBXBuildFile; productRef = H1000001 /* Supabase */; };
+		A1000001 /* FaceLabApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000001 /* FaceLabApp.swift */; };
+		A1000002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000002 /* ContentView.swift */; };
+		A1000003 /* ARFaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000003 /* ARFaceView.swift */; };
+		A1000004 /* MakeupStudioView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000004 /* MakeupStudioView.swift */; };
+		A1000005 /* MakeupModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000005 /* MakeupModels.swift */; };
+		A1000006 /* SupabaseService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000006 /* SupabaseService.swift */; };
+		A1000007 /* AuthViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000007 /* AuthViewModel.swift */; };
+		A1000008 /* LoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000008 /* LoginView.swift */; };
+		A1000009 /* Supabase.plist in Resources */ = {isa = PBXBuildFile; fileRef = B1000009 /* Supabase.plist */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -38,6 +39,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				034535752F5F1EDB00481A40 /* Supabase in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -147,7 +149,7 @@
 /* Begin PBXNativeTarget section */
 		F1000001 /* FaceLab */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = G1000003;
+			buildConfigurationList = G1000003 /* Build configuration list for PBXNativeTarget "FaceLab" */;
 			buildPhases = (
 				F1000002 /* Sources */,
 				D1000001 /* Frameworks */,
@@ -162,7 +164,7 @@
 				H1000001 /* Supabase */,
 			);
 			productName = FaceLab;
-			productReference = C1000001;
+			productReference = C1000001 /* FaceLab.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -180,7 +182,7 @@
 					};
 				};
 			};
-			buildConfigurationList = G1000001;
+			buildConfigurationList = G1000001 /* Build configuration list for PBXProject "FaceLab" */;
 			compatibilityVersion = "Xcode 14.0";
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
@@ -193,7 +195,7 @@
 			packageReferences = (
 				H1000002 /* XCRemoteSwiftPackageReference "supabase-swift" */,
 			);
-			productRefGroup = E1000009;
+			productRefGroup = E1000009 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
@@ -287,8 +289,10 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = FaceLab/FaceLab.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = G2RUT3Q828;
 				INFOPLIST_FILE = FaceLab/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -296,8 +300,9 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.facelab.app;
+				PRODUCT_BUNDLE_IDENTIFIER = com.ryusichan.facelab;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -311,8 +316,10 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = FaceLab/FaceLab.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = G2RUT3Q828;
 				INFOPLIST_FILE = FaceLab/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -320,8 +327,9 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.facelab.app;
+				PRODUCT_BUNDLE_IDENTIFIER = com.ryusichan.facelab;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -367,11 +375,10 @@
 /* Begin XCSwiftPackageProductDependency section */
 		H1000001 /* Supabase */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = H1000002;
+			package = H1000002 /* XCRemoteSwiftPackageReference "supabase-swift" */;
 			productName = Supabase;
 		};
 /* End XCSwiftPackageProductDependency section */
-
 	};
 	rootObject = F1000004 /* Project object */;
 }

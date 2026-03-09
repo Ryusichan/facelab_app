@@ -424,7 +424,8 @@ class MakeupViewModel: ObservableObject {
 
     // MARK: Internal State
     /// 현재 메이크업 텍스처 — FaceSceneCoordinator가 읽어 SCNMaterial에 적용
-    private(set) var makeupTexture: UIImage? = nil
+    /// nonisolated(unsafe): SceneKit 렌더 스레드에서 읽기 전용 접근, MainActor에서만 쓰기
+    nonisolated(unsafe) var makeupTexture: UIImage? = nil
 
     /// ARSCNView 참조 (캡처용)
     weak var sceneView: ARSCNView?
@@ -474,7 +475,7 @@ class MakeupViewModel: ObservableObject {
 
     /// ARSCNView 스냅샷을 사진 앨범에 저장
     func capturePhoto() {
-        guard let sceneView else { return }
+        guard let sceneView = sceneView else { return }
         let image = sceneView.snapshot()
 
         PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in

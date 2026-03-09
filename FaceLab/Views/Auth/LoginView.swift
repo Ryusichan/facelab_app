@@ -13,7 +13,7 @@ struct LoginView: View {
                 VStack(spacing: 8) {
                     Image(systemName: "face.smiling")
                         .font(.system(size: 72))
-                        .foregroundStyle(.accent)
+                        .foregroundStyle(Color.accentColor)
                     Text("FaceLab")
                         .font(.largeTitle.bold())
                     Text("Virtual Makeup Studio")
