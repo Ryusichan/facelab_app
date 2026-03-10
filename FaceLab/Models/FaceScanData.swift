@@ -4,92 +4,107 @@ import CoreImage
 
 // ============================================================
 // MARK: - FaceScanData
-// ARKit에서 캡처한 얼굴 mesh + 텍스처 데이터
-// 3D 뷰어에서 SCNGeometry로 변환하여 렌더링
+//
+// 파이프라인:
+//   1. ARKit capture → 캐노니컬 메시 생성 (CanonicalFaceMesh)
+//   2. ARKit 정점 KNN 보간으로 캐노니컬 메시를 사용자 얼굴에 피팅
+//   3. 피팅된 정점 + 캐노니컬 UV로 카메라 이미지 텍스처 베이킹
+//   4. 결과: 구멍 없는 완전한 위상의 3D 얼굴 모델 + 실제 얼굴 텍스처
+//
+// 이전 방식 (ARKit hollow mask + eye fill):
+//   → ARKit mask는 눈/입에 구멍이 있어 구조적으로 메이크업 앱에 부적합
+//   → 어떤 fill 방식(flat fan / 구면 보간)도 실제 눈꺼풀 위상을 생성할 수 없음
+//
+// 현재 방식 (캐노니컬 full-topology):
+//   → 캐노니컬 메시는 눈 소켓 포함, 구멍 없음
+//   → ARKit 데이터로 사용자 얼굴 형태에 맞게 변형
+//   → 카메라 텍스처가 눈 영역 실제 모습(홍채/동공 포함)을 표현
 // ============================================================
 struct FaceScanData: Equatable {
     static func == (lhs: FaceScanData, rhs: FaceScanData) -> Bool {
         lhs.vertices == rhs.vertices
     }
+
+    // 캐노니컬 메시 기반 정점/법선/UV/인덱스 (ARKit KNN 피팅 후)
     let vertices: [SIMD3<Float>]
     let normals: [SIMD3<Float>]
     let textureCoordinates: [SIMD2<Float>]
     let triangleIndices: [Int16]
     let faceTexture: UIImage?
 
-    /// 얼굴 mesh의 바운딩 박스 중심 (카메라 타겟용)
+    // ──────────────────────────────────────────
+    // MARK: 얼굴 메시 통계 (카메라 배치용)
+    // ──────────────────────────────────────────
     var meshCenter: SIMD3<Float> {
         guard !vertices.isEmpty else { return .zero }
-        let sum = vertices.reduce(SIMD3<Float>.zero, +)
-        return sum / Float(vertices.count)
+        return vertices.reduce(.zero, +) / Float(vertices.count)
     }
 
-    /// 얼굴 mesh의 최대 반경 (카메라 거리 계산용)
     var meshRadius: Float {
-        let center = meshCenter
-        return vertices.map { simd_length($0 - center) }.max() ?? 0.1
+        let c = meshCenter
+        return vertices.map { simd_length($0 - c) }.max() ?? 0.1
     }
 
     // ──────────────────────────────────────────
     // MARK: SCNGeometry 빌더
+    // 캐노니컬 메시는 이미 완전한 위상 → 추가 eye fill 불필요
     // ──────────────────────────────────────────
     func buildGeometry() -> SCNGeometry {
-        let vertexData = vertices.withUnsafeBytes { Data($0) }
-        let vertexSource = SCNGeometrySource(
-            data: vertexData, semantic: .vertex,
-            vectorCount: vertices.count, usesFloatComponents: true,
-            componentsPerVector: 3, bytesPerComponent: MemoryLayout<Float>.size,
-            dataOffset: 0, dataStride: MemoryLayout<SIMD3<Float>>.stride
-        )
-
-        let normalData = normals.withUnsafeBytes { Data($0) }
-        let normalSource = SCNGeometrySource(
-            data: normalData, semantic: .normal,
-            vectorCount: normals.count, usesFloatComponents: true,
-            componentsPerVector: 3, bytesPerComponent: MemoryLayout<Float>.size,
-            dataOffset: 0, dataStride: MemoryLayout<SIMD3<Float>>.stride
-        )
-
-        let uvData = textureCoordinates.withUnsafeBytes { Data($0) }
-        let uvSource = SCNGeometrySource(
-            data: uvData, semantic: .texcoord,
-            vectorCount: textureCoordinates.count, usesFloatComponents: true,
-            componentsPerVector: 2, bytesPerComponent: MemoryLayout<Float>.size,
-            dataOffset: 0, dataStride: MemoryLayout<SIMD2<Float>>.stride
-        )
-
-        let indexData = triangleIndices.withUnsafeBytes { Data($0) }
-        let element = SCNGeometryElement(
-            data: indexData, primitiveType: .triangles,
-            primitiveCount: triangleIndices.count / 3,
-            bytesPerIndex: MemoryLayout<Int16>.size
-        )
-
-        return SCNGeometry(sources: [vertexSource, normalSource, uvSource], elements: [element])
+        return Self.makeGeometry(verts: vertices, norms: normals,
+                                 uvs: textureCoordinates, idxs: triangleIndices)
     }
 
     // ──────────────────────────────────────────
-    // MARK: ARKit 캡처 → FaceScanData
+    // MARK: SCNGeometry 생성 헬퍼
+    // ──────────────────────────────────────────
+    private static func makeGeometry(
+        verts: [SIMD3<Float>], norms: [SIMD3<Float>],
+        uvs: [SIMD2<Float>], idxs: [Int16]
+    ) -> SCNGeometry {
+        let vSrc = SCNGeometrySource(data: verts.withUnsafeBytes { Data($0) },
+            semantic: .vertex, vectorCount: verts.count,
+            usesFloatComponents: true, componentsPerVector: 3,
+            bytesPerComponent: 4, dataOffset: 0, dataStride: MemoryLayout<SIMD3<Float>>.stride)
+        let nSrc = SCNGeometrySource(data: norms.withUnsafeBytes { Data($0) },
+            semantic: .normal, vectorCount: norms.count,
+            usesFloatComponents: true, componentsPerVector: 3,
+            bytesPerComponent: 4, dataOffset: 0, dataStride: MemoryLayout<SIMD3<Float>>.stride)
+        let uvSrc = SCNGeometrySource(data: uvs.withUnsafeBytes { Data($0) },
+            semantic: .texcoord, vectorCount: uvs.count,
+            usesFloatComponents: true, componentsPerVector: 2,
+            bytesPerComponent: 4, dataOffset: 0, dataStride: MemoryLayout<SIMD2<Float>>.stride)
+        let elem = SCNGeometryElement(data: idxs.withUnsafeBytes { Data($0) },
+            primitiveType: .triangles, primitiveCount: idxs.count / 3, bytesPerIndex: 2)
+        return SCNGeometry(sources: [vSrc, nSrc, uvSrc], elements: [elem])
+    }
+
+    // ──────────────────────────────────────────
+    // MARK: ARKit 캡처 → FaceScanData (캐노니컬 파이프라인)
+    //
+    // 1. CanonicalFaceMesh 생성 (구멍 없는 전체 위상)
+    // 2. ARKit 정점으로 캐노니컬 메시 KNN 피팅
+    // 3. 피팅된 메시 + 캐노니컬 UV로 텍스처 베이킹
     // ──────────────────────────────────────────
     static func capture(
         faceAnchor: ARFaceAnchor,
         frame: ARFrame,
         viewportSize: CGSize
     ) -> FaceScanData {
-        let geo = faceAnchor.geometry
+        let arkitVerts = faceAnchor.geometry.vertices.map { $0 }
 
-        let verts = geo.vertices.map { $0 }
-        let uvs   = geo.textureCoordinates.map { $0 }
-        let idxs  = geo.triangleIndices.map { $0 }
+        // 1. 캐노니컬 메시 생성
+        let canonical = CanonicalFaceMesh.generate()
 
-        // 삼각형 면 법선을 정점에 누적 → smooth normal 계산
-        let norms = computeSmoothNormals(vertices: verts, indices: idxs)
+        // 2. ARKit 정점으로 피팅 (KNN 보간, 눈 소켓 형태 보존)
+        let fitted = canonical.fitted(to: arkitVerts)
 
-        // 정점별 카메라 색상 샘플링 → UV 래스터라이제이션 → 블러 후처리
+        // 3. 피팅된 정점 + 캐노니컬 UV로 카메라 텍스처 베이킹
+        //    캐노니컬 UV는 [0,1]×[0,1] 그리드 → 눈 영역도 커버
+        //    → 베이킹 결과물에 실제 홍채/동공이 정확한 위치에 표현됨
         let texture = bakeTexture(
-            vertices: verts,
-            uvCoordinates: uvs,
-            triangleIndices: idxs,
+            vertices: fitted.vertices,
+            uvCoordinates: fitted.uvCoordinates,
+            triangleIndices: fitted.triangleIndices,
             faceTransform: faceAnchor.transform,
             camera: frame.camera,
             capturedImage: frame.capturedImage,
@@ -97,48 +112,23 @@ struct FaceScanData: Equatable {
         )
 
         return FaceScanData(
-            vertices: verts, normals: norms,
-            textureCoordinates: uvs, triangleIndices: idxs,
+            vertices: fitted.vertices,
+            normals: fitted.normals,
+            textureCoordinates: fitted.uvCoordinates,
+            triangleIndices: fitted.triangleIndices,
             faceTexture: texture
         )
     }
 
     // ──────────────────────────────────────────
-    // MARK: Smooth Normal 계산
-    // 인접 삼각형의 면 법선을 정점에 누적 후 정규화
-    // → 회전 시 자연스러운 음영 (Phong shading에 필수)
-    // ──────────────────────────────────────────
-    private static func computeSmoothNormals(
-        vertices: [SIMD3<Float>],
-        indices: [Int16]
-    ) -> [SIMD3<Float>] {
-        var normals = [SIMD3<Float>](repeating: .zero, count: vertices.count)
-
-        for t in stride(from: 0, to: indices.count, by: 3) {
-            let i0 = Int(indices[t])
-            let i1 = Int(indices[t + 1])
-            let i2 = Int(indices[t + 2])
-
-            let edge1 = vertices[i1] - vertices[i0]
-            let edge2 = vertices[i2] - vertices[i0]
-            let faceNormal = cross(edge1, edge2) // 면적에 비례한 가중치가 자동 적용
-
-            normals[i0] += faceNormal
-            normals[i1] += faceNormal
-            normals[i2] += faceNormal
-        }
-
-        return normals.map { n in
-            let len = simd_length(n)
-            return len > 1e-6 ? n / len : SIMD3<Float>(0, 0, 1)
-        }
-    }
-
-    // ──────────────────────────────────────────
     // MARK: 텍스처 베이킹 (per-pixel 바리센트릭 보간)
-    // ARKit UV 좌표는 landscape 카메라 이미지 기준으로 설계됨
-    // 이미지 회전 없이 UV → landscape 픽셀 좌표로 직접 샘플링
-    // → 왜곡 없는 정확한 얼굴 텍스처 베이킹
+    //
+    // 삼각형별로 UV 공간(텍스처 아틀라스)을 래스터라이즈하여
+    // 각 텍셀이 대응하는 카메라 픽셀을 샘플링
+    //
+    // 캐노니컬 UV [0,1]×[0,1]을 사용하므로:
+    //   - 텍스처 아틀라스 전체가 고르게 사용됨
+    //   - 눈 소켓 정점 → 실제 눈 픽셀 샘플링 → 텍스처에 실제 눈 표현
     // ──────────────────────────────────────────
     private static func bakeTexture(
         vertices: [SIMD3<Float>],
@@ -156,8 +146,8 @@ struct FaceScanData: Equatable {
         let ciCtx = CIContext(options: [.useSoftwareRenderer: false])
         guard let cgImage = ciCtx.createCGImage(ciImage, from: ciImage.extent) else { return nil }
 
-        let imgW = cgImage.width   // portrait 기준 width (≈960)
-        let imgH = cgImage.height  // portrait 기준 height (≈1280)
+        let imgW = cgImage.width   // portrait 기준 ≈960
+        let imgH = cgImage.height  // portrait 기준 ≈1280
         guard imgW > 0, imgH > 0,
               let provider = cgImage.dataProvider,
               let pixelData = provider.data,
@@ -166,8 +156,7 @@ struct FaceScanData: Equatable {
         let srcBPP = max(3, cgImage.bitsPerPixel / 8)
 
         // ── 정점 3D → 카메라 픽셀 좌표 ──
-        // viewportSize에 카메라 이미지 실제 크기를 사용 → 화면 비율 왜곡 없음
-        // (이전 방식: 화면 크기 390×844 → 카메라 960×1280 비율 불일치로 세로 압축)
+        // viewportSize = 카메라 이미지 실제 크기 → 화면 비율 왜곡 없음
         let cameraViewport = CGSize(width: Double(imgW), height: Double(imgH))
         let camPoints: [SIMD2<Float>] = vertices.map { v in
             let w = faceTransform * SIMD4<Float>(v.x, v.y, v.z, 1)
@@ -248,7 +237,7 @@ struct FaceScanData: Equatable {
             bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
         ), let outCG = ctx.makeImage() else { return nil }
 
-        // seam 최소 스무딩 (per-pixel 샘플링 덕에 블러 최소화)
+        // 경계 seam 최소화 스무딩
         let outCI = CIImage(cgImage: outCG)
         let blurred = outCI.clampedToExtent()
             .applyingGaussianBlur(sigma: 0.6)
@@ -260,60 +249,16 @@ struct FaceScanData: Equatable {
     }
 
     // ──────────────────────────────────────────
-    // MARK: 기본 mesh 생성 (사진 선택용)
+    // MARK: 기본 메시 (사진 선택 / ARKit 없는 경우)
+    // 캐노니컬 메시의 변형 없는 기본 형태 사용
     // ──────────────────────────────────────────
     static func generateDefaultMesh(faceImage: UIImage?) -> FaceScanData {
-        var verts: [SIMD3<Float>] = []
-        var uvs:   [SIMD2<Float>] = []
-        var idxs:  [Int16] = []
-
-        let rows = 64
-        let cols = 64
-
-        for row in 0...rows {
-            for col in 0...cols {
-                let u = Float(col) / Float(cols)
-                let v = Float(row) / Float(rows)
-
-                // 타원체 전면부 (코 높이 돌출 포함)
-                let theta = (u - 0.5) * .pi * 0.8
-                let phi   = (v - 0.5) * .pi * 1.0
-
-                // 기본 구면
-                var x = sin(theta) * cos(phi) * 0.07
-                var y = -sin(phi) * 0.09
-                var z = (cos(theta) * cos(phi) - 1.0) * 0.035
-
-                // 코 돌출: UV 중심부에 가우시안 범프
-                let du = u - 0.5, dv = v - 0.45
-                let noseBump = 0.012 * exp(-(du*du)/(2*0.015) - (dv*dv)/(2*0.02))
-                z += Float(noseBump)
-
-                // 눈 오목: 좌우 눈 위치에 오목한 범프
-                let leftEye  = 0.004 * exp(-pow(u-0.35, 2)/0.008 - pow(v-0.38, 2)/0.005)
-                let rightEye = 0.004 * exp(-pow(u-0.65, 2)/0.008 - pow(v-0.38, 2)/0.005)
-                z -= Float(leftEye + rightEye)
-
-                verts.append(SIMD3(x, y, z))
-                uvs.append(SIMD2(u, v))
-            }
-        }
-
-        for row in 0..<rows {
-            for col in 0..<cols {
-                let tl = Int16(row * (cols + 1) + col)
-                let tr = tl + 1
-                let bl = tl + Int16(cols + 1)
-                let br = bl + 1
-                idxs.append(contentsOf: [tl, bl, tr, tr, bl, br])
-            }
-        }
-
-        let norms = computeSmoothNormals(vertices: verts, indices: idxs)
-
+        let canonical = CanonicalFaceMesh.generate()
         return FaceScanData(
-            vertices: verts, normals: norms,
-            textureCoordinates: uvs, triangleIndices: idxs,
+            vertices: canonical.vertices,
+            normals: canonical.normals,
+            textureCoordinates: canonical.uvCoordinates,
+            triangleIndices: canonical.triangleIndices,
             faceTexture: faceImage
         )
     }

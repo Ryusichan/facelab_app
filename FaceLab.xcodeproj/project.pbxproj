@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		0303CB262F604E7C007D6B61 /* FaceScanData.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0303CB252F604E7C007D6B61 /* FaceScanData.swift */; };
+		0303CB272F604E7C007D6B62 /* CanonicalFaceMesh.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0303CB282F604E7C007D6B62 /* CanonicalFaceMesh.swift */; };
 		034535752F5F1EDB00481A40 /* Supabase in Frameworks */ = {isa = PBXBuildFile; productRef = H1000001 /* Supabase */; };
 		A1000001 /* FaceLabApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000001 /* FaceLabApp.swift */; };
 		A1000002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000002 /* ContentView.swift */; };
@@ -27,6 +28,7 @@
 
 /* Begin PBXFileReference section */
 		0303CB252F604E7C007D6B61 /* FaceScanData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FaceScanData.swift; sourceTree = "<group>"; };
+		0303CB282F604E7C007D6B62 /* CanonicalFaceMesh.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanonicalFaceMesh.swift; sourceTree = "<group>"; };
 		B1000001 /* FaceLabApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FaceLabApp.swift; sourceTree = "<group>"; };
 		B1000002 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		B1000003 /* ARFaceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ARFaceView.swift; sourceTree = "<group>"; };
@@ -140,6 +142,7 @@
 			isa = PBXGroup;
 			children = (
 				0303CB252F604E7C007D6B61 /* FaceScanData.swift */,
+				0303CB282F604E7C007D6B62 /* CanonicalFaceMesh.swift */,
 				B1000005 /* MakeupModels.swift */,
 			);
 			path = Models;
@@ -263,6 +266,7 @@
 				A1000007 /* AuthViewModel.swift in Sources */,
 				A1000008 /* LoginView.swift in Sources */,
 				0303CB262F604E7C007D6B61 /* FaceScanData.swift in Sources */,
+				0303CB272F604E7C007D6B62 /* CanonicalFaceMesh.swift in Sources */,
 				A100000A /* InputMethodView.swift in Sources */,
 				A100000B /* FaceCaptureView.swift in Sources */,
 				A100000C /* PhotoPickerView.swift in Sources */,

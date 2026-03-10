@@ -394,7 +394,7 @@ struct FaceSceneContainer: UIViewRepresentable {
         let mat = SCNMaterial()
         // Blinn은 HDR 환경맵 없이도 부드럽고 자연스러운 피부 질감 표현
         mat.lightingModel = .blinn
-        mat.isDoubleSided = false
+        mat.isDoubleSided = true
 
         let skinFallback = UIColor(red: 0.88, green: 0.76, blue: 0.66, alpha: 1)
         mat.diffuse.contents  = texture ?? skinFallback
