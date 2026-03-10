@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		0303CB262F604E7C007D6B61 /* FaceScanData.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0303CB252F604E7C007D6B61 /* FaceScanData.swift */; };
 		034535752F5F1EDB00481A40 /* Supabase in Frameworks */ = {isa = PBXBuildFile; productRef = H1000001 /* Supabase */; };
 		A1000001 /* FaceLabApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000001 /* FaceLabApp.swift */; };
 		A1000002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000002 /* ContentView.swift */; };
@@ -17,9 +18,15 @@
 		A1000007 /* AuthViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000007 /* AuthViewModel.swift */; };
 		A1000008 /* LoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000008 /* LoginView.swift */; };
 		A1000009 /* Supabase.plist in Resources */ = {isa = PBXBuildFile; fileRef = B1000009 /* Supabase.plist */; };
+		A100000A /* InputMethodView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B100000C /* InputMethodView.swift */; };
+		A100000B /* FaceCaptureView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B100000D /* FaceCaptureView.swift */; };
+		A100000C /* PhotoPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B100000E /* PhotoPickerView.swift */; };
+		A100000D /* ProcessingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B100000F /* ProcessingView.swift */; };
+		A100000E /* Face3DEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000010 /* Face3DEditorView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		0303CB252F604E7C007D6B61 /* FaceScanData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FaceScanData.swift; sourceTree = "<group>"; };
 		B1000001 /* FaceLabApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FaceLabApp.swift; sourceTree = "<group>"; };
 		B1000002 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		B1000003 /* ARFaceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ARFaceView.swift; sourceTree = "<group>"; };
@@ -31,6 +38,11 @@
 		B1000009 /* Supabase.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Supabase.plist; sourceTree = "<group>"; };
 		B100000A /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		B100000B /* FaceLab.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = FaceLab.entitlements; sourceTree = "<group>"; };
+		B100000C /* InputMethodView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InputMethodView.swift; sourceTree = "<group>"; };
+		B100000D /* FaceCaptureView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FaceCaptureView.swift; sourceTree = "<group>"; };
+		B100000E /* PhotoPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoPickerView.swift; sourceTree = "<group>"; };
+		B100000F /* ProcessingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessingView.swift; sourceTree = "<group>"; };
+		B1000010 /* Face3DEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Face3DEditorView.swift; sourceTree = "<group>"; };
 		C1000001 /* FaceLab.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = FaceLab.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -83,6 +95,8 @@
 				E1000005 /* AR */,
 				E1000006 /* Makeup */,
 				E100000B /* Auth */,
+				E100000C /* Input */,
+				E100000D /* Processing */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -99,13 +113,33 @@
 			isa = PBXGroup;
 			children = (
 				B1000004 /* MakeupStudioView.swift */,
+				B1000010 /* Face3DEditorView.swift */,
 			);
 			path = Makeup;
+			sourceTree = "<group>";
+		};
+		E100000C /* Input */ = {
+			isa = PBXGroup;
+			children = (
+				B100000C /* InputMethodView.swift */,
+				B100000D /* FaceCaptureView.swift */,
+				B100000E /* PhotoPickerView.swift */,
+			);
+			path = Input;
+			sourceTree = "<group>";
+		};
+		E100000D /* Processing */ = {
+			isa = PBXGroup;
+			children = (
+				B100000F /* ProcessingView.swift */,
+			);
+			path = Processing;
 			sourceTree = "<group>";
 		};
 		E1000007 /* Models */ = {
 			isa = PBXGroup;
 			children = (
+				0303CB252F604E7C007D6B61 /* FaceScanData.swift */,
 				B1000005 /* MakeupModels.swift */,
 			);
 			path = Models;
@@ -228,6 +262,12 @@
 				A1000006 /* SupabaseService.swift in Sources */,
 				A1000007 /* AuthViewModel.swift in Sources */,
 				A1000008 /* LoginView.swift in Sources */,
+				0303CB262F604E7C007D6B61 /* FaceScanData.swift in Sources */,
+				A100000A /* InputMethodView.swift in Sources */,
+				A100000B /* FaceCaptureView.swift in Sources */,
+				A100000C /* PhotoPickerView.swift in Sources */,
+				A100000D /* ProcessingView.swift in Sources */,
+				A100000E /* Face3DEditorView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

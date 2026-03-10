@@ -24,12 +24,12 @@ struct ProcessingView: View {
             // 3D 큐브 애니메이션
             ZStack {
                 Circle()
-                    .fill(.accent.opacity(0.08))
+                    .fill(Color.accentColor.opacity(0.08))
                     .frame(width: 140, height: 140)
 
                 Image(systemName: steps[currentStep].1)
                     .font(.system(size: 48))
-                    .foregroundStyle(.accent)
+                    .foregroundStyle(Color.accentColor)
                     .contentTransition(.symbolEffect(.replace))
             }
 
@@ -41,7 +41,7 @@ struct ProcessingView: View {
 
                 // 프로그레스 바
                 ProgressView(value: progress)
-                    .tint(.accent)
+                    .tint(Color.accentColor)
                     .frame(width: 200)
 
                 Text("\(Int(progress * 100))%")

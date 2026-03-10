@@ -267,7 +267,7 @@ struct Face3DEditorView: View {
                         Text(viewModel.isBeforeMode ? "After" : "Before")
                             .font(.system(size: 9, weight: .medium))
                     }
-                    .foregroundStyle(viewModel.isBeforeMode ? .accent : .white.opacity(0.8))
+                    .foregroundStyle(viewModel.isBeforeMode ? Color.accentColor : .white.opacity(0.8))
                     .frame(width: 54, height: 44)
                 }
 
@@ -304,7 +304,7 @@ struct Face3DEditorView: View {
                         .font(.system(size: 18))
                         .foregroundStyle(.white)
                         .frame(width: 44, height: 44)
-                        .background(.accent, in: Circle())
+                        .background(Color.accentColor, in: Circle())
                 }
             }
             .padding(.horizontal, 16)

@@ -15,7 +15,7 @@ struct InputMethodView: View {
             VStack(spacing: 8) {
                 Image(systemName: "face.smiling")
                     .font(.system(size: 56))
-                    .foregroundStyle(.accent)
+                    .foregroundStyle(Color.accentColor)
                 Text("얼굴을 스캔하세요")
                     .font(.title2.bold())
                 Text("3D 얼굴 모델을 만들고 가상 메이크업을 적용해보세요")

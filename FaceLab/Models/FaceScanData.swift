@@ -7,7 +7,10 @@ import CoreImage
 // ARKit에서 캡처한 얼굴 mesh + 텍스처 데이터
 // 3D 뷰어에서 SCNGeometry로 변환하여 렌더링
 // ============================================================
-struct FaceScanData {
+struct FaceScanData: Equatable {
+    static func == (lhs: FaceScanData, rhs: FaceScanData) -> Bool {
+        lhs.vertices == rhs.vertices
+    }
     let vertices: [SIMD3<Float>]
     let normals: [SIMD3<Float>]
     let textureCoordinates: [SIMD2<Float>]
@@ -75,9 +78,9 @@ struct FaceScanData {
     ) -> FaceScanData {
         let geo = faceAnchor.geometry
 
-        let verts = (0..<geo.vertexCount).map { geo.vertices[$0] }
-        let uvs   = (0..<geo.textureCoordinateCount).map { geo.textureCoordinates[$0] }
-        let idxs  = (0..<geo.triangleCount * 3).map { geo.triangleIndices[$0] }
+        let verts = geo.vertices.map { $0 }
+        let uvs   = geo.textureCoordinates.map { $0 }
+        let idxs  = geo.triangleIndices.map { $0 }
 
         // 삼각형 면 법선을 정점에 누적 → smooth normal 계산
         let norms = computeSmoothNormals(vertices: verts, indices: idxs)

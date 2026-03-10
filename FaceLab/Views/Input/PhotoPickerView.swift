@@ -96,7 +96,7 @@ struct PhotoPickerView: View {
                                 .foregroundStyle(.white)
                                 .frame(maxWidth: .infinity)
                                 .padding(.vertical, 14)
-                                .background(.accent, in: RoundedRectangle(cornerRadius: 14))
+                                .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 14))
                         }
                     }
                 }
