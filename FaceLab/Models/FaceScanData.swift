@@ -135,10 +135,10 @@ struct FaceScanData: Equatable {
     }
 
     // ──────────────────────────────────────────
-    // MARK: 텍스처 베이킹 (개선)
-    // 1단계: 정점별 카메라 색상 샘플링
-    // 2단계: 삼각형별 3-정점 평균색 래스터라이제이션
-    // 3단계: CIGaussianBlur로 seam 스무딩
+    // MARK: 텍스처 베이킹 (per-pixel 바리센트릭 보간)
+    // ARKit UV 좌표는 landscape 카메라 이미지 기준으로 설계됨
+    // 이미지 회전 없이 UV → landscape 픽셀 좌표로 직접 샘플링
+    // → 왜곡 없는 정확한 얼굴 텍스처 베이킹
     // ──────────────────────────────────────────
     private static func bakeTexture(
         vertices: [SIMD3<Float>],
@@ -149,94 +149,112 @@ struct FaceScanData: Equatable {
         capturedImage: CVPixelBuffer,
         viewportSize: CGSize
     ) -> UIImage? {
-        let texSize = 1024 // 고해상도 (512 → 1024)
+        let texSize = 1024
 
-        // ── 카메라 이미지 → portrait CGImage ──
+        // ── 카메라 이미지 → portrait 방향으로 회전 ──
         let ciImage = CIImage(cvPixelBuffer: capturedImage).oriented(.right)
         let ciCtx = CIContext(options: [.useSoftwareRenderer: false])
         guard let cgImage = ciCtx.createCGImage(ciImage, from: ciImage.extent) else { return nil }
 
-        let imgW = cgImage.width
-        let imgH = cgImage.height
-        guard let provider = cgImage.dataProvider,
+        let imgW = cgImage.width   // portrait 기준 width (≈960)
+        let imgH = cgImage.height  // portrait 기준 height (≈1280)
+        guard imgW > 0, imgH > 0,
+              let provider = cgImage.dataProvider,
               let pixelData = provider.data,
-              let bytes = CFDataGetBytePtr(pixelData) else { return nil }
-        let bytesPerRow = cgImage.bytesPerRow
-        let bpp = cgImage.bitsPerPixel / 8
+              let srcBytes = CFDataGetBytePtr(pixelData) else { return nil }
+        let srcBPR = cgImage.bytesPerRow
+        let srcBPP = max(3, cgImage.bitsPerPixel / 8)
 
-        // ── 정점별 3D → 스크린 좌표 프로젝션 ──
-        let screenPoints: [CGPoint] = vertices.map { v in
-            let world4 = faceTransform * SIMD4<Float>(v.x, v.y, v.z, 1)
-            return camera.projectPoint(
-                SIMD3(world4.x, world4.y, world4.z),
-                orientation: .portrait, viewportSize: viewportSize
+        // ── 정점 3D → 카메라 픽셀 좌표 ──
+        // viewportSize에 카메라 이미지 실제 크기를 사용 → 화면 비율 왜곡 없음
+        // (이전 방식: 화면 크기 390×844 → 카메라 960×1280 비율 불일치로 세로 압축)
+        let cameraViewport = CGSize(width: Double(imgW), height: Double(imgH))
+        let camPoints: [SIMD2<Float>] = vertices.map { v in
+            let w = faceTransform * SIMD4<Float>(v.x, v.y, v.z, 1)
+            let sp = camera.projectPoint(SIMD3(w.x, w.y, w.z),
+                                         orientation: .portrait,
+                                         viewportSize: cameraViewport)
+            return SIMD2<Float>(
+                Float(max(0.0, min(Double(imgW - 1), sp.x))),
+                Float(max(0.0, min(Double(imgH - 1), sp.y)))
             )
         }
 
-        // ── 정점별 카메라 색상 샘플링 ──
-        struct RGB { var r: CGFloat; var g: CGFloat; var b: CGFloat }
-        let vertexColors: [RGB] = screenPoints.map { sp in
-            let px = max(0, min(imgW - 1, Int(sp.x / viewportSize.width * CGFloat(imgW))))
-            let py = max(0, min(imgH - 1, Int(sp.y / viewportSize.height * CGFloat(imgH))))
-            let offset = py * bytesPerRow + px * bpp
-            return RGB(
-                r: CGFloat(bytes[offset]) / 255,
-                g: CGFloat(bytes[offset + 1]) / 255,
-                b: CGFloat(bytes[offset + 2]) / 255
-            )
-        }
+        // ── 출력 버퍼 (RGBA, 4 bytes/pixel) ──
+        let dstBPP = 4
+        let dstBPR = texSize * dstBPP
+        var dstBuf = [UInt8](repeating: 0, count: texSize * dstBPR)
+        let sz = Float(texSize)
 
-        // ── 삼각형별 래스터라이제이션 (3정점 평균색) ──
-        let format = UIGraphicsImageRendererFormat()
-        format.scale = 1
-        format.opaque = false
-        let sz = CGFloat(texSize)
+        // ── 삼각형별 per-pixel 래스터라이제이션 ──
+        for t in stride(from: 0, to: triangleIndices.count, by: 3) {
+            let i0 = Int(triangleIndices[t])
+            let i1 = Int(triangleIndices[t + 1])
+            let i2 = Int(triangleIndices[t + 2])
 
-        let renderer = UIGraphicsImageRenderer(
-            size: CGSize(width: texSize, height: texSize), format: format
-        )
+            // 텍스처 공간 UV 좌표 (픽셀 단위)
+            let u0 = SIMD2<Float>(uvCoordinates[i0].x * sz, uvCoordinates[i0].y * sz)
+            let u1 = SIMD2<Float>(uvCoordinates[i1].x * sz, uvCoordinates[i1].y * sz)
+            let u2 = SIMD2<Float>(uvCoordinates[i2].x * sz, uvCoordinates[i2].y * sz)
 
-        let rawTexture = renderer.image { ctx in
-            for t in stride(from: 0, to: triangleIndices.count, by: 3) {
-                let i0 = Int(triangleIndices[t])
-                let i1 = Int(triangleIndices[t + 1])
-                let i2 = Int(triangleIndices[t + 2])
+            // 대응 카메라 픽셀 좌표
+            let c0 = camPoints[i0], c1 = camPoints[i1], c2 = camPoints[i2]
 
-                // 3 정점 색상 평균 (flat shading보다 부드러움)
-                let c0 = vertexColors[i0], c1 = vertexColors[i1], c2 = vertexColors[i2]
-                let avgColor = UIColor(
-                    red:   (c0.r + c1.r + c2.r) / 3,
-                    green: (c0.g + c1.g + c2.g) / 3,
-                    blue:  (c0.b + c1.b + c2.b) / 3,
-                    alpha: 1
-                )
+            // 바운딩 박스
+            let minX = max(0, Int((min(u0.x, u1.x, u2.x)).rounded(.down)))
+            let maxX = min(texSize - 1, Int((max(u0.x, u1.x, u2.x)).rounded(.up)))
+            let minY = max(0, Int((min(u0.y, u1.y, u2.y)).rounded(.down)))
+            let maxY = min(texSize - 1, Int((max(u0.y, u1.y, u2.y)).rounded(.up)))
+            guard maxX >= minX, maxY >= minY else { continue }
 
-                let p0 = CGPoint(x: CGFloat(uvCoordinates[i0].x) * sz,
-                                 y: CGFloat(uvCoordinates[i0].y) * sz)
-                let p1 = CGPoint(x: CGFloat(uvCoordinates[i1].x) * sz,
-                                 y: CGFloat(uvCoordinates[i1].y) * sz)
-                let p2 = CGPoint(x: CGFloat(uvCoordinates[i2].x) * sz,
-                                 y: CGFloat(uvCoordinates[i2].y) * sz)
+            // 바리센트릭 계수 (분모)
+            let denom = (u1.y - u2.y) * (u0.x - u2.x) + (u2.x - u1.x) * (u0.y - u2.y)
+            guard abs(denom) > 0.01 else { continue }
+            let inv = 1.0 / denom
 
-                let path = UIBezierPath()
-                path.move(to: p0)
-                path.addLine(to: p1)
-                path.addLine(to: p2)
-                path.close()
-                avgColor.setFill()
-                path.fill()
+            for py in minY...maxY {
+                let fy = Float(py) + 0.5
+                for px in minX...maxX {
+                    let fx = Float(px) + 0.5
+
+                    // 바리센트릭 좌표 계산
+                    let w0 = ((u1.y - u2.y) * (fx - u2.x) + (u2.x - u1.x) * (fy - u2.y)) * inv
+                    let w1 = ((u2.y - u0.y) * (fx - u2.x) + (u0.x - u2.x) * (fy - u2.y)) * inv
+                    let w2 = 1.0 - w0 - w1
+                    guard w0 >= -0.002, w1 >= -0.002, w2 >= -0.002 else { continue }
+
+                    // 카메라 이미지 좌표 보간
+                    let camX = min(imgW - 1, max(0, Int((w0 * c0.x + w1 * c1.x + w2 * c2.x).rounded())))
+                    let camY = min(imgH - 1, max(0, Int((w0 * c0.y + w1 * c1.y + w2 * c2.y).rounded())))
+
+                    // 카메라 픽셀 샘플링
+                    let srcOff = camY * srcBPR + camX * srcBPP
+                    let dstOff = py * dstBPR + px * dstBPP
+                    dstBuf[dstOff]     = srcBytes[srcOff]
+                    dstBuf[dstOff + 1] = srcBytes[srcOff + 1]
+                    dstBuf[dstOff + 2] = srcBytes[srcOff + 2]
+                    dstBuf[dstOff + 3] = 255
+                }
             }
         }
 
-        // ── Gaussian 블러로 삼각형 seam 스무딩 ──
-        guard let rawCG = rawTexture.cgImage else { return rawTexture }
-        let rawCI = CIImage(cgImage: rawCG)
-        let blurred = rawCI.clampedToExtent()
-            .applyingGaussianBlur(sigma: 1.2)
-            .cropped(to: rawCI.extent)
+        // ── 픽셀 버퍼 → CGImage ──
+        guard let ctx = CGContext(
+            data: &dstBuf,
+            width: texSize, height: texSize,
+            bitsPerComponent: 8,
+            bytesPerRow: dstBPR,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ), let outCG = ctx.makeImage() else { return nil }
 
+        // seam 최소 스무딩 (per-pixel 샘플링 덕에 블러 최소화)
+        let outCI = CIImage(cgImage: outCG)
+        let blurred = outCI.clampedToExtent()
+            .applyingGaussianBlur(sigma: 0.6)
+            .cropped(to: outCI.extent)
         guard let finalCG = ciCtx.createCGImage(blurred, from: blurred.extent) else {
-            return rawTexture
+            return UIImage(cgImage: outCG)
         }
         return UIImage(cgImage: finalCG)
     }
