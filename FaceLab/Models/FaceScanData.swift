@@ -249,8 +249,8 @@ struct FaceScanData: Equatable {
         var uvs:   [SIMD2<Float>] = []
         var idxs:  [Int16] = []
 
-        let rows = 32
-        let cols = 32
+        let rows = 64
+        let cols = 64
 
         for row in 0...rows {
             for col in 0...cols {

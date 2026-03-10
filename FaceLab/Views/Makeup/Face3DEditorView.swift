@@ -328,9 +328,10 @@ struct FaceSceneContainer: UIViewRepresentable {
     func makeUIView(context: Context) -> SCNView {
         let scnView = SCNView(frame: .zero)
         scnView.antialiasingMode = .multisampling4X
-        scnView.backgroundColor = UIColor(white: 0.06, alpha: 1)
+        scnView.backgroundColor = UIColor(red: 0.08, green: 0.08, blue: 0.12, alpha: 1)
         scnView.autoenablesDefaultLighting = false
         scnView.allowsCameraControl = false
+        scnView.preferredFramesPerSecond = 60
 
         let scene = SCNScene()
         let center = viewModel.scanData.meshCenter
@@ -351,11 +352,11 @@ struct FaceSceneContainer: UIViewRepresentable {
         // ── 카메라 ──
         let cameraNode = SCNNode()
         cameraNode.camera = SCNCamera()
-        cameraNode.camera?.fieldOfView = 40
+        cameraNode.camera?.fieldOfView = 42        // 넓은 FOV → 얼굴이 화면 일부만 차지
         cameraNode.camera?.zNear = 0.001
         cameraNode.camera?.zFar = 10
-        let camDist = radius * 3.5
-        cameraNode.position = SCNVector3(center.x, center.y, center.z + camDist)
+        let camDist = radius * 5.0                // 충분히 뒤로 → 얼굴이 작게 + 여백 확보
+        cameraNode.position = SCNVector3(center.x, center.y + radius * 0.1, center.z + camDist)
         cameraNode.look(at: SCNVector3(center.x, center.y, center.z))
         scene.rootNode.addChildNode(cameraNode)
 
@@ -391,17 +392,27 @@ struct FaceSceneContainer: UIViewRepresentable {
     // ──────────────────────────────────────────
     static func buildSkinMaterial(texture: UIImage?) -> SCNMaterial {
         let mat = SCNMaterial()
-        mat.lightingModel = .physicallyBased
-        mat.isDoubleSided = true
+        // Blinn은 HDR 환경맵 없이도 부드럽고 자연스러운 피부 질감 표현
+        mat.lightingModel = .blinn
+        mat.isDoubleSided = false
 
-        mat.diffuse.contents = texture ?? UIColor(red: 0.87, green: 0.75, blue: 0.65, alpha: 1)
+        let skinFallback = UIColor(red: 0.88, green: 0.76, blue: 0.66, alpha: 1)
+        mat.diffuse.contents  = texture ?? skinFallback
         mat.diffuse.wrapS = .clamp
         mat.diffuse.wrapT = .clamp
+        mat.diffuse.intensity = 1.0
 
-        mat.roughness.contents = 0.65
-        mat.metalness.contents = 0.0
+        // 피부 하이라이트: 약한 스페큘러
+        mat.specular.contents = UIColor(white: 0.25, alpha: 1)
+        mat.shininess         = 18.0
 
-        mat.ambient.contents = UIColor(red: 0.95, green: 0.80, blue: 0.70, alpha: 1)
+        // 앰비언트: 어두운 곳 채움
+        mat.ambient.contents  = UIColor(red: 0.55, green: 0.45, blue: 0.40, alpha: 1)
+        mat.ambient.intensity = 0.4
+
+        // 깊이 쓰기 명시적 활성화 → 헤드 구체가 페이스 메시를 침범하지 않도록
+        mat.writesToDepthBuffer = true
+        mat.readsFromDepthBuffer = true
 
         return mat
     }
@@ -472,12 +483,11 @@ struct FaceSceneContainer: UIViewRepresentable {
                 lastPanPoint = .zero
             case .changed:
                 let dx = Float(translation.x - lastPanPoint.x) * 0.005
-                let dy = Float(translation.y - lastPanPoint.y) * 0.005
                 lastPanPoint = translation
 
-                viewModel.orbitAngleX += dy
+                // Y축(좌우) 회전만 허용 — 상하(X축) 회전 없음
                 viewModel.orbitAngleY += dx
-                viewModel.orbitAngleX = max(-.pi * 0.44, min(.pi * 0.44, viewModel.orbitAngleX))
+                viewModel.orbitAngleX = 0   // 항상 수평 고정
 
                 updateCameraOrbit(cameraNode)
             default:
@@ -497,8 +507,8 @@ struct FaceSceneContainer: UIViewRepresentable {
                 lastPinchScale = gesture.scale
 
                 viewModel.orbitDistance /= delta
-                let minDist = viewModel.scanData.meshRadius * 1.5
-                let maxDist = viewModel.scanData.meshRadius * 8
+                let minDist = viewModel.scanData.meshRadius * 3.0
+                let maxDist = viewModel.scanData.meshRadius * 8.0
                 viewModel.orbitDistance = max(minDist, min(maxDist, viewModel.orbitDistance))
 
                 updateCameraOrbit(cameraNode)
@@ -556,7 +566,7 @@ class FaceEditorViewModel: ObservableObject {
 
     init(scanData: FaceScanData) {
         self.scanData = scanData
-        self.orbitDistance = scanData.meshRadius * 3.5
+        self.orbitDistance = scanData.meshRadius * 5.0
     }
 
     // MARK: Computed
@@ -603,11 +613,11 @@ class FaceEditorViewModel: ObservableObject {
     }
 
     func resetCamera() {
-        guard let cameraNode else { return }
+        guard let cameraNode = cameraNode else { return }
 
         orbitAngleX = 0
         orbitAngleY = 0
-        orbitDistance = scanData.meshRadius * 3.5
+        orbitDistance = scanData.meshRadius * 5.0
 
         SCNTransaction.begin()
         SCNTransaction.animationDuration = 0.4
@@ -621,7 +631,7 @@ class FaceEditorViewModel: ObservableObject {
     // MARK: 메이크업 텍스처 합성
     // ──────────────────────────────────────────
     func applyMakeupTexture() {
-        guard let faceNode else { return }
+        guard let faceNode = faceNode else { return }
         let skinFallback = UIColor(red: 0.87, green: 0.75, blue: 0.65, alpha: 1)
 
         if isBeforeMode {
@@ -645,7 +655,7 @@ class FaceEditorViewModel: ObservableObject {
         format.opaque = true
 
         return UIGraphicsImageRenderer(size: size, format: format).image { _ in
-            if let base {
+            if let base = base {
                 base.draw(in: CGRect(origin: .zero, size: size))
             } else {
                 UIColor(red: 0.87, green: 0.75, blue: 0.65, alpha: 1).setFill()
@@ -657,7 +667,7 @@ class FaceEditorViewModel: ObservableObject {
 
     // MARK: Capture
     func capturePhoto() {
-        guard let scnView else { return }
+        guard let scnView = scnView else { return }
         let image = scnView.snapshot()
 
         PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
