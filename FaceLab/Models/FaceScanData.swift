@@ -124,17 +124,9 @@ struct FaceScanData: Equatable {
                                         camera: frame.camera,
                                         capturedImage: frame.capturedImage)
 
-        // ── 실제 홍채 반경 측정 ──
-        // 카메라 이미지에서 홍채 경계(limbal ring)를 픽셀 스캔 → 미터 환산
-        let fallbackIrisR = eyeHoles.leftRadius * (1.0 / 1.65) * 0.92
-        let leftIrisR  = measureIrisRadius(eyeWorldPos: leftEyeWorld,
-                                           camera: frame.camera,
-                                           capturedImage: frame.capturedImage,
-                                           fallback: fallbackIrisR)
-        let rightIrisR = measureIrisRadius(eyeWorldPos: rightEyeWorld,
-                                           camera: frame.camera,
-                                           capturedImage: frame.capturedImage,
-                                           fallback: fallbackIrisR)
+        // ── 홍채 반경: face mesh 눈 구멍 테두리 = 홍채 경계 (ARKit 3D 측정값 직접 사용) ──
+        let leftIrisR  = eyeHoles.leftIrisRadius
+        let rightIrisR = eyeHoles.rightIrisRadius
 
         let texture = bakeTexture(
             vertices: vertices,
@@ -341,80 +333,6 @@ struct FaceScanData: Equatable {
     }
 
     // ──────────────────────────────────────────
-    // MARK: 홍채 반경 측정 (카메라 이미지 픽셀 스캔)
-    //
-    // 알고리즘:
-    //   1. 안구 중심을 portrait 이미지에 투영
-    //   2. 8방향 ray를 쏴서 어두운 홍채 → 밝은 공막 경계를 탐색
-    //   3. 평균 픽셀 반경 산출
-    //   4. 1mm 오프셋 두 점을 투영해 픽셀/미터 스케일 계산 → 미터 환산
-    //   5. 실패 시 fallback 반환 (face mesh holeR 기반)
-    // ──────────────────────────────────────────
-    private static func measureIrisRadius(
-        eyeWorldPos: SIMD3<Float>,
-        camera: ARCamera,
-        capturedImage: CVPixelBuffer,
-        fallback: Float
-    ) -> Float {
-        let ciImage = CIImage(cvPixelBuffer: capturedImage).oriented(.right)
-        let ciCtx = CIContext(options: [.useSoftwareRenderer: false])
-        guard let cgImage = ciCtx.createCGImage(ciImage, from: ciImage.extent) else { return fallback }
-
-        let imgW = cgImage.width, imgH = cgImage.height
-        guard imgW > 0, imgH > 0 else { return fallback }
-        let viewport = CGSize(width: Double(imgW), height: Double(imgH))
-
-        let sp = camera.projectPoint(eyeWorldPos, orientation: .portrait, viewportSize: viewport)
-        let cx = Int(sp.x), cy = Int(sp.y)
-        guard cx > 40, cy > 40, cx < imgW - 40, cy < imgH - 40 else { return fallback }
-
-        guard let provider = cgImage.dataProvider,
-              let data = provider.data,
-              let bytes = CFDataGetBytePtr(data) else { return fallback }
-        let bpp = max(3, cgImage.bitsPerPixel / 8)
-        let bpr = cgImage.bytesPerRow
-
-        // 8방향 ray — 홍채(어두움)에서 공막(밝음)으로 전환되는 픽셀 위치 탐색
-        var irisPixelRadii: [Float] = []
-        for i in 0..<8 {
-            let angle = Float(i) * Float.pi / 4
-            for r in 4..<120 {
-                let px = cx + Int(Float(r) * cos(angle))
-                let py = cy + Int(Float(r) * sin(angle))
-                guard px >= 0, px < imgW, py >= 0, py < imgH else { break }
-                let off = py * bpr + px * bpp
-                let brightness = (Float(bytes[off]) + Float(bytes[off+1]) + Float(bytes[off+2])) / 3.0
-                // 150 이상 = 공막 또는 피부 (밝음)
-                if brightness > 150 {
-                    irisPixelRadii.append(Float(r))
-                    break
-                }
-            }
-        }
-        // 최소 4방향 탐지 성공해야 신뢰 가능
-        guard irisPixelRadii.count >= 4 else { return fallback }
-
-        // 이상치 제거: 중앙값 ±40% 범위만 사용
-        let sorted = irisPixelRadii.sorted()
-        let median = sorted[sorted.count / 2]
-        let filtered = irisPixelRadii.filter { abs($0 - median) < median * 0.4 }
-        guard !filtered.isEmpty else { return fallback }
-        let avgPixelR = filtered.reduce(0, +) / Float(filtered.count)
-
-        // 픽셀 → 미터 변환: 1mm 오프셋 두 점을 투영해 픽셀/미터 스케일 산출
-        let sp0 = camera.projectPoint(eyeWorldPos,
-                                      orientation: .portrait, viewportSize: viewport)
-        let sp1 = camera.projectPoint(eyeWorldPos + SIMD3<Float>(0.001, 0, 0),
-                                      orientation: .portrait, viewportSize: viewport)
-        let pxPerMm = Float(hypot(sp1.x - sp0.x, sp1.y - sp0.y))
-        guard pxPerMm > 0.5 else { return fallback }
-
-        let irisMeters = (avgPixelR / pxPerMm) * 0.001  // mm → m
-        // 인체 홍채 반경 범위: 4.5 ~ 8.5mm 로 클램프
-        return max(0.0045, min(0.0085, irisMeters))
-    }
-
-    // ──────────────────────────────────────────
     // MARK: 스무스 법선 계산
     // ──────────────────────────────────────────
     private static func smoothNormals(verts: [SIMD3<Float>], idxs: [Int16]) -> [SIMD3<Float>] {
@@ -444,8 +362,8 @@ struct FaceScanData: Equatable {
             rightEyePosition:   nil,
             leftEyeHoleRadius:  0.011,
             rightEyeHoleRadius: 0.011,
-            leftIrisRadius:     0.006,
-            rightIrisRadius:    0.006,
+            leftIrisRadius:     0.011 / 1.65,   // holeR = eyeR / 1.65
+            rightIrisRadius:    0.011 / 1.65,
             leftIrisColor:  UIColor(red: 0.40, green: 0.25, blue: 0.12, alpha: 1),
             rightIrisColor: UIColor(red: 0.40, green: 0.25, blue: 0.12, alpha: 1)
         )
@@ -465,8 +383,8 @@ struct FaceScanData: Equatable {
     private static func findEyeHoleCentersFromMesh(
         vertices: [SIMD3<Float>],
         indices: [Int16]
-    ) -> (leftPos: SIMD3<Float>?, leftRadius: Float,
-          rightPos: SIMD3<Float>?, rightRadius: Float) {
+    ) -> (leftPos: SIMD3<Float>?, leftRadius: Float, leftIrisRadius: Float,
+          rightPos: SIMD3<Float>?, rightRadius: Float, rightIrisRadius: Float) {
 
         struct Edge: Hashable {
             let a: Int, b: Int
@@ -488,7 +406,7 @@ struct FaceScanData: Equatable {
             adj[edge.a, default: []].append(edge.b)
             adj[edge.b, default: []].append(edge.a)
         }
-        guard !adj.isEmpty else { return (nil, 0.011, nil, 0.011) }
+        guard !adj.isEmpty else { return (nil, 0.011, 0.008, nil, 0.011, 0.008) }
 
         // 3. BFS로 연결 컴포넌트 분리
         var visited = Set<Int>()
@@ -511,10 +429,10 @@ struct FaceScanData: Equatable {
 
         // 4. 가장 큰 컴포넌트 = 얼굴 외곽 경계선 → 제외
         guard let maxSize = components.map({ $0.count }).max() else {
-            return (nil, 0.011, nil, 0.011)
+            return (nil, 0.011, 0.008, nil, 0.011, 0.008)
         }
         let innerHoles = components.filter { $0.count < maxSize }
-        guard innerHoles.count >= 2 else { return (nil, 0.011, nil, 0.011) }
+        guard innerHoles.count >= 2 else { return (nil, 0.011, 0.008, nil, 0.011, 0.008) }
 
         // 5. 평균 Y 기준 내림차순 정렬 → 상위 2개 = 눈 구멍 (입은 Y가 낮아 제외)
         let sortedHoles = innerHoles.map { comp -> (avgY: Float, verts: [SIMD3<Float>]) in
@@ -533,25 +451,25 @@ struct FaceScanData: Equatable {
         let rightVerts = cx1 >= cx2 ? hole2Verts : hole1Verts
 
         // 7. 눈 구멍 중심·반경 계산
-        func holeInfo(_ verts: [SIMD3<Float>]) -> (SIMD3<Float>, Float)? {
+        // holeR = 테두리 정점까지의 평균 거리 = face mesh에서 직접 측정한 홍채 경계 반경
+        // eyeR  = 안구 전체 구체 반경 (홍채보다 크게 — 눈꺼풀 뒤로 숨겨지는 구조 표현)
+        func holeInfo(_ verts: [SIMD3<Float>]) -> (center: SIMD3<Float>, eyeR: Float, irisR: Float)? {
             guard !verts.isEmpty else { return nil }
             let center = verts.reduce(.zero, +) / Float(verts.count)
-            // 구멍 테두리 정점까지의 평균 거리 = 눈 구멍 반경
             let avgDist = verts.map { simd_length($0 - center) }.reduce(0, +) / Float(verts.count)
             let holeR = max(0.008, avgDist)
-            // 안구 반경 = 구멍 반경 × 1.2 (기본 20% 증가)
-            let eyeR = holeR * 1.65
-            // 안구 중심 Z:
-            //   d > eyeR 이면 구면 전면이 face 표면 뒤에 위치 → 돌출 없음
-            //   d = eyeR * 1.3 → 전면이 림 기준 0.3*holeR 안쪽에 위치
-            //   face mesh 구멍(hole)을 통해 단면 95%가 보임 (실제 눈 소켓 구조)
+            // irisR = holeR 그대로: face mesh 눈 구멍 테두리 = 홍채 경계 (ARKit 정밀 측정)
+            let irisR = holeR
+            // eyeR = 안구 전체 반경 (홍채보다 1.65× 커서 눈꺼풀 뒤 공막까지 표현)
+            let eyeR  = holeR * 1.65
             let d = eyeR * 1.1
             let eyeCenter = SIMD3<Float>(center.x, center.y, center.z - d)
-            return (eyeCenter, eyeR)
+            return (eyeCenter, eyeR, irisR)
         }
 
         let left  = holeInfo(leftVerts)
         let right = holeInfo(rightVerts)
-        return (left?.0, left?.1 ?? 0.011, right?.0, right?.1 ?? 0.011)
+        return (left?.center, left?.eyeR ?? 0.011, left?.irisR ?? 0.008,
+                right?.center, right?.eyeR ?? 0.011, right?.irisR ?? 0.008)
     }
 }

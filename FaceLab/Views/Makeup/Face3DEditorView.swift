@@ -88,29 +88,6 @@ struct Face3DEditorView: View {
                 .font(.headline)
                 .foregroundStyle(.white)
             Spacer()
-            // 안구 깊이 조절
-            HStack(spacing: 4) {
-                Button { viewModel.adjustEyeZ(-0.002) } label: {
-                    Image(systemName: "minus")
-                        .font(.caption.bold())
-                        .foregroundStyle(.white)
-                        .frame(width: 24, height: 24)
-                        .background(.black.opacity(0.4), in: Circle())
-                }
-                Image(systemName: "eye")
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(0.7))
-                Button { viewModel.adjustEyeZ(0.002) } label: {
-                    Image(systemName: "plus")
-                        .font(.caption.bold())
-                        .foregroundStyle(.white)
-                        .frame(width: 24, height: 24)
-                        .background(.black.opacity(0.4), in: Circle())
-                }
-            }
-            .padding(.horizontal, 6)
-            .padding(.vertical, 4)
-            .background(.black.opacity(0.35), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             // 카메라 리셋
             Button { viewModel.resetCamera() } label: {
                 Image(systemName: "arrow.triangle.2.circlepath.camera")
@@ -371,8 +348,6 @@ struct FaceSceneContainer: UIViewRepresentable {
 
         // ── 안구 배치 ──
         Self.addEyeballs(to: scene, scanData: viewModel.scanData)
-        viewModel.baseLeftEyeZ  = viewModel.scanData.leftEyePosition?.z  ?? 0
-        viewModel.baseRightEyeZ = viewModel.scanData.rightEyePosition?.z ?? 0
 
         // ── 3-Point 스튜디오 라이팅 ──
         Self.addStudioLighting(to: scene, center: center, radius: radius)
@@ -409,15 +384,6 @@ struct FaceSceneContainer: UIViewRepresentable {
 
     func updateUIView(_ uiView: SCNView, context: Context) {
         viewModel.applyMakeupTexture()
-        // 안구 Z 위치 조절 (사용자 eyeZOffset 반영)
-        if let scene = uiView.scene {
-            if let n = scene.rootNode.childNode(withName: "eye_left", recursively: false) {
-                n.simdPosition.z = viewModel.baseLeftEyeZ + viewModel.eyeZOffset
-            }
-            if let n = scene.rootNode.childNode(withName: "eye_right", recursively: false) {
-                n.simdPosition.z = viewModel.baseRightEyeZ + viewModel.eyeZOffset
-            }
-        }
     }
 
     func makeCoordinator() -> Coordinator {
@@ -788,16 +754,11 @@ class FaceEditorViewModel: ObservableObject {
     }()
     @Published var isBeforeMode = false
     @Published var showCaptureFlash = false
-    @Published var eyeZOffset: Float = 0
 
     // MARK: Scene References
     weak var faceNode: SCNNode?
     weak var cameraNode: SCNNode?
     weak var scnView: SCNView?
-
-    // MARK: Eye Z Base (set after scene build)
-    var baseLeftEyeZ:  Float = 0
-    var baseRightEyeZ: Float = 0
 
     // MARK: Orbit Camera State
     var orbitAngleX: Float = 0
@@ -867,10 +828,6 @@ class FaceEditorViewModel: ObservableObject {
         cameraNode.position = initialCameraPosition
         cameraNode.look(at: orbitTarget)
         SCNTransaction.commit()
-    }
-
-    func adjustEyeZ(_ delta: Float) {
-        eyeZOffset += delta
     }
 
     // ──────────────────────────────────────────
