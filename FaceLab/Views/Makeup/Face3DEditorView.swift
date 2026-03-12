@@ -88,6 +88,29 @@ struct Face3DEditorView: View {
                 .font(.headline)
                 .foregroundStyle(.white)
             Spacer()
+            // 안구 깊이 조절
+            HStack(spacing: 4) {
+                Button { viewModel.adjustEyeZ(-0.002) } label: {
+                    Image(systemName: "minus")
+                        .font(.caption.bold())
+                        .foregroundStyle(.white)
+                        .frame(width: 24, height: 24)
+                        .background(.black.opacity(0.4), in: Circle())
+                }
+                Image(systemName: "eye")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.7))
+                Button { viewModel.adjustEyeZ(0.002) } label: {
+                    Image(systemName: "plus")
+                        .font(.caption.bold())
+                        .foregroundStyle(.white)
+                        .frame(width: 24, height: 24)
+                        .background(.black.opacity(0.4), in: Circle())
+                }
+            }
+            .padding(.horizontal, 6)
+            .padding(.vertical, 4)
+            .background(.black.opacity(0.35), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             // 카메라 리셋
             Button { viewModel.resetCamera() } label: {
                 Image(systemName: "arrow.triangle.2.circlepath.camera")
@@ -348,6 +371,8 @@ struct FaceSceneContainer: UIViewRepresentable {
 
         // ── 안구 배치 ──
         Self.addEyeballs(to: scene, scanData: viewModel.scanData)
+        viewModel.baseLeftEyeZ  = viewModel.scanData.leftEyePosition?.z  ?? 0
+        viewModel.baseRightEyeZ = viewModel.scanData.rightEyePosition?.z ?? 0
 
         // ── 3-Point 스튜디오 라이팅 ──
         Self.addStudioLighting(to: scene, center: center, radius: radius)
@@ -384,6 +409,15 @@ struct FaceSceneContainer: UIViewRepresentable {
 
     func updateUIView(_ uiView: SCNView, context: Context) {
         viewModel.applyMakeupTexture()
+        // 안구 Z 위치 조절 (사용자 eyeZOffset 반영)
+        if let scene = uiView.scene {
+            if let n = scene.rootNode.childNode(withName: "eye_left", recursively: false) {
+                n.simdPosition.z = viewModel.baseLeftEyeZ + viewModel.eyeZOffset
+            }
+            if let n = scene.rootNode.childNode(withName: "eye_right", recursively: false) {
+                n.simdPosition.z = viewModel.baseRightEyeZ + viewModel.eyeZOffset
+            }
+        }
     }
 
     func makeCoordinator() -> Coordinator {
@@ -427,13 +461,14 @@ struct FaceSceneContainer: UIViewRepresentable {
     // 홍채 색상은 촬영 시 카메라 이미지에서 샘플링한 실제 색상 사용
     // ──────────────────────────────────────────
     static func addEyeballs(to scene: SCNScene, scanData: FaceScanData) {
-        let eyes: [(SIMD3<Float>?, Float, UIColor)] = [
-            (scanData.leftEyePosition,  scanData.leftEyeHoleRadius,  scanData.leftIrisColor),
-            (scanData.rightEyePosition, scanData.rightEyeHoleRadius, scanData.rightIrisColor)
+        let eyes: [(SIMD3<Float>?, Float, UIColor, String)] = [
+            (scanData.leftEyePosition,  scanData.leftEyeHoleRadius,  scanData.leftIrisColor,  "eye_left"),
+            (scanData.rightEyePosition, scanData.rightEyeHoleRadius, scanData.rightIrisColor, "eye_right")
         ]
-        for (position, holeRadius, irisColor) in eyes {
+        for (position, holeRadius, irisColor, name) in eyes {
             guard let pos = position else { continue }
             let eyeNode = makeEyeballNode(irisColor: irisColor, holeRadius: holeRadius)
+            eyeNode.name = name
             eyeNode.simdPosition = pos
             scene.rootNode.addChildNode(eyeNode)
         }
@@ -441,77 +476,182 @@ struct FaceSceneContainer: UIViewRepresentable {
 
     static func makeEyeballNode(irisColor: UIColor, holeRadius: Float = 0.011) -> SCNNode {
         let eyeNode = SCNNode()
-        // 안구 반경 = 눈 구멍 반경과 동일하게 맞춤 (눈 구멍에 꼭 맞는 크기)
         let eyeRadius = CGFloat(holeRadius)
 
         // ── 공막 (흰자) ──
+        // 따뜻한 베이지/황갈색 톤 — 순백·아이보리보다 더 낮은 채도
         let sclera = SCNSphere(radius: eyeRadius)
         let scleraMat = SCNMaterial()
         scleraMat.lightingModel = .blinn
-        scleraMat.diffuse.contents  = UIColor(white: 0.97, alpha: 1)
-        scleraMat.specular.contents = UIColor(white: 0.7, alpha: 1)
-        scleraMat.shininess = 55
-        scleraMat.writesToDepthBuffer   = true
-        scleraMat.readsFromDepthBuffer  = true
+        scleraMat.diffuse.contents  = makeScleraTexture()
+        scleraMat.specular.contents = UIColor(white: 0.12, alpha: 1)   // 반사 최소화
+        scleraMat.shininess         = 12
+        scleraMat.ambient.contents  = UIColor(red: 0.45, green: 0.40, blue: 0.35, alpha: 1)
+        scleraMat.writesToDepthBuffer  = true
+        scleraMat.readsFromDepthBuffer = true
         sclera.materials = [scleraMat]
         eyeNode.addChildNode(SCNNode(geometry: sclera))
 
         // ── 홍채 + 동공 디스크 ──
-        // 홍채 반경 = 안구 반경의 55% (실제 비율)
-        let irisRadius = eyeRadius * 0.55
-        let irisDisk = SCNCylinder(radius: irisRadius, height: 0.0001)
+        // SCNPlane 사용: +Z 방향을 자연스럽게 향해 UV 매핑이 안정적
+        // SCNCylinder의 캡 UV 문제(중심 흰색 공백)를 원천 차단
+        let irisRadius = eyeRadius * 0.60
+        let irisDisk = SCNPlane(width: irisRadius * 2, height: irisRadius * 2)
         let irisMat = SCNMaterial()
         irisMat.lightingModel = .blinn
-        irisMat.diffuse.contents = makeEyeTexture(irisColor: irisColor)
-        irisMat.isDoubleSided = false
+        irisMat.diffuse.contents  = makeEyeTexture(irisColor: irisColor)
+        irisMat.specular.contents = UIColor(white: 0.08, alpha: 1)
+        irisMat.shininess         = 18
+        irisMat.isDoubleSided     = true   // 뒤에서도 렌더링
         irisMat.writesToDepthBuffer  = true
         irisMat.readsFromDepthBuffer = true
         irisDisk.materials = [irisMat]
 
         let irisNode = SCNNode(geometry: irisDisk)
-        // SCNCylinder 기본 축 = Y → X축으로 90° 회전하면 면이 +Z를 향함
-        irisNode.eulerAngles = SCNVector3(Float.pi / 2, 0, 0)
-        // 공막 앞 표면에 살짝 돌출
-        irisNode.simdPosition = SIMD3(0, 0, Float(eyeRadius) * 0.97)
+        // 공막 구체 앞면 = eyeRadius, 홍채를 1.01×로 배치해야
+        // 깊이 테스트에서 항상 공막 앞에 렌더링됨 (각막 돌출 구조와도 일치)
+        irisNode.simdPosition = SIMD3(0, 0, Float(eyeRadius) * 1.01)
         eyeNode.addChildNode(irisNode)
 
         return eyeNode
     }
 
-    // ── 홍채/동공 텍스처 생성 ──
-    // 동심원: 홍채(sampled color) + 동공(검정) + 하이라이트(흰점)
-    static func makeEyeTexture(irisColor: UIColor) -> UIImage {
+    // ── 공막(흰자) 텍스처 ──
+    // 순백이 아닌 따뜻한 크림색 + 미세 혈관 흔적으로 사실감 부여
+    static func makeScleraTexture() -> UIImage {
         let size = CGSize(width: 256, height: 256)
-        return UIGraphicsImageRenderer(size: size).image { _ in
+        return UIGraphicsImageRenderer(size: size).image { ctx in
             let c = CGPoint(x: 128, y: 128)
             let r: CGFloat = 128
 
-            // 홍채
-            irisColor.setFill()
-            UIBezierPath(arcCenter: c, radius: r, startAngle: 0, endAngle: .pi * 2, clockwise: true).fill()
+            // 기본 공막 색상: 황갈색 베이지 — 흰색과 거리를 두어 자연스러운 눈 표현
+            UIColor(red: 0.78, green: 0.72, blue: 0.63, alpha: 1).setFill()
+            UIBezierPath(arcCenter: c, radius: r, startAngle: 0, endAngle: .pi*2, clockwise: true).fill()
 
-            // 홍채 방사형 결 (미세 어두운 선)
-            var h: CGFloat = 0, s: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
-            irisColor.getHue(&h, saturation: &s, brightness: &b, alpha: &a)
-            let darkIris = UIColor(hue: h, saturation: min(1, s * 1.3), brightness: b * 0.65, alpha: 0.45)
-            for i in 0..<20 {
-                let angle = CGFloat(i) * .pi / 10
+            // 미세 혈관 (가장자리 방향으로 얇은 분홍선)
+            let vesselColor = UIColor(red: 0.80, green: 0.58, blue: 0.58, alpha: 0.32)
+            for i in 0..<12 {
+                let baseAngle = CGFloat(i) * .pi / 6
                 let path = UIBezierPath()
-                path.move(to: CGPoint(x: c.x + cos(angle) * r * 0.32, y: c.y + sin(angle) * r * 0.32))
-                path.addLine(to: CGPoint(x: c.x + cos(angle) * r, y: c.y + sin(angle) * r))
-                path.lineWidth = 1.2
-                darkIris.setStroke()
+                let startR = r * 0.55
+                path.move(to: CGPoint(x: c.x + cos(baseAngle)*startR,
+                                      y: c.y + sin(baseAngle)*startR))
+                // 혈관은 가지치기 형태로 끝부분이 갈라짐
+                let midAngle = baseAngle + CGFloat(i % 2 == 0 ? 0.06 : -0.06)
+                let midR = r * 0.78
+                path.addLine(to: CGPoint(x: c.x + cos(midAngle)*midR,
+                                         y: c.y + sin(midAngle)*midR))
+                let endAngle1 = midAngle + 0.05
+                let endAngle2 = midAngle - 0.05
+                path.addLine(to: CGPoint(x: c.x + cos(endAngle1)*r*0.92,
+                                         y: c.y + sin(endAngle1)*r*0.92))
+                path.move(to: CGPoint(x: c.x + cos(midAngle)*midR,
+                                      y: c.y + sin(midAngle)*midR))
+                path.addLine(to: CGPoint(x: c.x + cos(endAngle2)*r*0.88,
+                                         y: c.y + sin(endAngle2)*r*0.88))
+                path.lineWidth = 0.6
+                vesselColor.setStroke()
                 path.stroke()
             }
 
-            // 동공
-            UIColor.black.setFill()
-            UIBezierPath(arcCenter: c, radius: r * 0.36, startAngle: 0, endAngle: .pi * 2, clockwise: true).fill()
+            // 눈꺼풀 접촉 부분 (상하 가장자리 미세 붉은기)
+            let limbusColor = UIColor(red: 0.90, green: 0.82, blue: 0.82, alpha: 0.2)
+            let topPath = UIBezierPath(arcCenter: c, radius: r*0.95,
+                                       startAngle: .pi*1.2, endAngle: .pi*1.8, clockwise: true)
+            topPath.lineWidth = r * 0.18
+            limbusColor.setStroke()
+            topPath.stroke()
+        }
+    }
 
-            // 각막 하이라이트
-            UIColor.white.withAlphaComponent(0.55).setFill()
-            UIBezierPath(arcCenter: CGPoint(x: 150, y: 106), radius: 15,
-                         startAngle: 0, endAngle: .pi * 2, clockwise: true).fill()
+    // ── 홍채/동공 텍스처 생성 ──
+    // 레이어: 홍채 기본색 → 스트로마 섬유 → 크립트 → 리마링 → 동공 → 각막 하이라이트
+    static func makeEyeTexture(irisColor: UIColor) -> UIImage {
+        let size = CGSize(width: 512, height: 512)
+        return UIGraphicsImageRenderer(size: size).image { ctx in
+            let c = CGPoint(x: 256, y: 256)
+            let r: CGFloat = 256
+
+            var h: CGFloat = 0, s: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+            irisColor.getHue(&h, saturation: &s, brightness: &b, alpha: &a)
+
+            // 1. 홍채 기본 배경 — 원본 밝기보다 15% 낮춰서 인물 눈빛에 자연스러운 깊이감
+            let baseColor = UIColor(hue: h, saturation: min(1, s * 1.05), brightness: b * 0.72, alpha: 1)
+            baseColor.setFill()
+            UIBezierPath(arcCenter: c, radius: r, startAngle: 0, endAngle: .pi*2, clockwise: true).fill()
+
+            // 외곽 어두운 링 (깊이감)
+            let outerDark = UIColor(hue: h, saturation: min(1, s*1.2), brightness: b*0.45, alpha: 0.65)
+            for ring in 0..<3 {
+                let ringR = r * (0.82 + CGFloat(ring) * 0.06)
+                let ringPath = UIBezierPath(arcCenter: c, radius: ringR,
+                                            startAngle: 0, endAngle: .pi*2, clockwise: true)
+                ringPath.lineWidth = r * 0.05
+                outerDark.setStroke()
+                ringPath.stroke()
+            }
+
+            // 2. 스트로마 섬유 (방사형 — 촘촘한 결)
+            let fiberCount = 60
+            for i in 0..<fiberCount {
+                let angle = CGFloat(i) * .pi * 2 / CGFloat(fiberCount)
+                // 홀수/짝수로 밝기 교차 → 자연스러운 결
+                let alpha: CGFloat = (i % 3 == 0) ? 0.40 : 0.18
+                let fiberBright: CGFloat = (i % 2 == 0) ? b * 0.42 : b * 0.88
+                let fiberColor = UIColor(hue: h,
+                                         saturation: (i % 2 == 0) ? min(1, s*1.3) : s*0.55,
+                                         brightness: fiberBright, alpha: alpha)
+                let innerR = r * 0.33
+                // 섬유 길이 변화로 불규칙한 질감
+                let outerR = r * (0.72 + CGFloat(i % 5) * 0.05)
+                let path = UIBezierPath()
+                path.move(to: CGPoint(x: c.x + cos(angle)*innerR, y: c.y + sin(angle)*innerR))
+                path.addLine(to: CGPoint(x: c.x + cos(angle)*outerR, y: c.y + sin(angle)*outerR))
+                path.lineWidth = (i % 4 == 0) ? 1.8 : 0.9
+                fiberColor.setStroke()
+                path.stroke()
+            }
+
+            // 3. 크립트 (Crypts) — 홍채 내부 불규칙 패턴 (결정적 위치)
+            let cryptColor = UIColor(hue: h, saturation: s, brightness: b * 0.35, alpha: 0.45)
+            let cryptAngles: [CGFloat] = [0.4, 1.1, 1.9, 2.8, 3.7, 4.5, 5.3, 6.0]
+            let cryptDists: [CGFloat] = [0.52, 0.64, 0.55, 0.70, 0.58, 0.62, 0.48, 0.67]
+            let cryptSizes: [CGFloat] = [0.07, 0.05, 0.08, 0.06, 0.07, 0.05, 0.06, 0.08]
+            for i in 0..<cryptAngles.count {
+                let px = c.x + cos(cryptAngles[i]) * r * cryptDists[i]
+                let py = c.y + sin(cryptAngles[i]) * r * cryptDists[i]
+                cryptColor.setFill()
+                UIBezierPath(arcCenter: CGPoint(x: px, y: py), radius: r * cryptSizes[i],
+                             startAngle: 0, endAngle: .pi*2, clockwise: true).fill()
+            }
+
+            // 4. 리마 링 (Limbal ring) — 홍채 가장자리 짙은 테두리 (젊고 건강한 눈 특징)
+            let limbalRing = UIColor(hue: h, saturation: min(1, s*1.1), brightness: b * 0.22, alpha: 0.75)
+            let limbal = UIBezierPath(arcCenter: c, radius: r * 0.90,
+                                      startAngle: 0, endAngle: .pi*2, clockwise: true)
+            limbal.lineWidth = r * 0.12
+            limbalRing.setStroke()
+            limbal.stroke()
+
+            // 5. 동공 (Pupil) — 순수 검정
+            UIColor(red: 0.04, green: 0.04, blue: 0.06, alpha: 1).setFill()
+            UIBezierPath(arcCenter: c, radius: r * 0.30, startAngle: 0, endAngle: .pi*2, clockwise: true).fill()
+
+            // 6. 동공-홍채 경계 (자연스러운 그라데이션 효과)
+            let pupilEdge = UIColor(hue: h, saturation: min(1, s*1.3), brightness: b * 0.28, alpha: 0.6)
+            let pe = UIBezierPath(arcCenter: c, radius: r * 0.35,
+                                   startAngle: 0, endAngle: .pi*2, clockwise: true)
+            pe.lineWidth = r * 0.10
+            pupilEdge.setStroke()
+            pe.stroke()
+
+            // 7. 각막 반사 하이라이트 — 절제된 톤으로 자연스러운 습윤감만 표현
+            UIColor.white.withAlphaComponent(0.38).setFill()
+            UIBezierPath(arcCenter: CGPoint(x: c.x + r*0.16, y: c.y - r*0.20),
+                         radius: r * 0.07, startAngle: 0, endAngle: .pi*2, clockwise: true).fill()
+            UIColor.white.withAlphaComponent(0.15).setFill()
+            UIBezierPath(arcCenter: CGPoint(x: c.x - r*0.14, y: c.y + r*0.16),
+                         radius: r * 0.035, startAngle: 0, endAngle: .pi*2, clockwise: true).fill()
         }
     }
 
@@ -649,11 +789,16 @@ class FaceEditorViewModel: ObservableObject {
     }()
     @Published var isBeforeMode = false
     @Published var showCaptureFlash = false
+    @Published var eyeZOffset: Float = 0
 
     // MARK: Scene References
     weak var faceNode: SCNNode?
     weak var cameraNode: SCNNode?
     weak var scnView: SCNView?
+
+    // MARK: Eye Z Base (set after scene build)
+    var baseLeftEyeZ:  Float = 0
+    var baseRightEyeZ: Float = 0
 
     // MARK: Orbit Camera State
     var orbitAngleX: Float = 0
@@ -723,6 +868,10 @@ class FaceEditorViewModel: ObservableObject {
         cameraNode.position = initialCameraPosition
         cameraNode.look(at: orbitTarget)
         SCNTransaction.commit()
+    }
+
+    func adjustEyeZ(_ delta: Float) {
+        eyeZOffset += delta
     }
 
     // ──────────────────────────────────────────

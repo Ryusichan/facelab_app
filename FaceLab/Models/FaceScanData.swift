@@ -446,12 +446,15 @@ struct FaceScanData: Equatable {
             // 구멍 테두리 정점까지의 평균 거리 = 눈 구멍 반경
             let avgDist = verts.map { simd_length($0 - center) }.reduce(0, +) / Float(verts.count)
             let holeR = max(0.008, avgDist)
-            // 안구 반경 = 구멍 반경 (눈 구멍에 꼭 맞게)
-            // 안구 중심 Z: 구멍 림 기준으로 안구를 안쪽에 위치
-            //   → 안구 단면이 구멍을 채우려면 center.z 근처에 위치
-            //   → center.z - holeR * 0.1: 안구가 약간 뒤에 있으며 전면부가 잘 보임
-            let eyeCenter = SIMD3<Float>(center.x, center.y, center.z - holeR * 0.1)
-            return (eyeCenter, holeR)
+            // 안구 반경 = 구멍 반경 × 1.2 (기본 20% 증가)
+            let eyeR = holeR * 1.65
+            // 안구 중심 Z:
+            //   d > eyeR 이면 구면 전면이 face 표면 뒤에 위치 → 돌출 없음
+            //   d = eyeR * 1.3 → 전면이 림 기준 0.3*holeR 안쪽에 위치
+            //   face mesh 구멍(hole)을 통해 단면 95%가 보임 (실제 눈 소켓 구조)
+            let d = eyeR * 1.1
+            let eyeCenter = SIMD3<Float>(center.x, center.y, center.z - d)
+            return (eyeCenter, eyeR)
         }
 
         let left  = holeInfo(leftVerts)
