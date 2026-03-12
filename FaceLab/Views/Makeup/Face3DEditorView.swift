@@ -689,7 +689,9 @@ struct FaceSceneContainer: UIViewRepresentable {
                 lastPanPoint = translation
 
                 // Y축(좌우) 회전만 허용 — 상하(X축) 회전 없음
-                viewModel.orbitAngleY += dx
+                // 메이크업 앱 특성상 뒷면이 보이지 않도록 ±65° 로 제한
+                let maxAngle: Float = 65 * .pi / 180
+                viewModel.orbitAngleY = max(-maxAngle, min(maxAngle, viewModel.orbitAngleY + dx))
                 viewModel.orbitAngleX = 0   // 항상 수평 고정
 
                 updateCameraOrbit(cameraNode)

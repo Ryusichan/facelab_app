@@ -362,8 +362,8 @@ struct FaceScanData: Equatable {
             rightEyePosition:   nil,
             leftEyeHoleRadius:  0.011,
             rightEyeHoleRadius: 0.011,
-            leftIrisRadius:     0.011 / 1.65,   // holeR = eyeR / 1.65
-            rightIrisRadius:    0.011 / 1.65,
+            leftIrisRadius:     0.007,   // 0.011 * 1.65 * 0.38 ≒ 0.0069
+            rightIrisRadius:    0.007,
             leftIrisColor:  UIColor(red: 0.40, green: 0.25, blue: 0.12, alpha: 1),
             rightIrisColor: UIColor(red: 0.40, green: 0.25, blue: 0.12, alpha: 1)
         )
@@ -458,11 +458,14 @@ struct FaceScanData: Equatable {
             let center = verts.reduce(.zero, +) / Float(verts.count)
             let avgDist = verts.map { simd_length($0 - center) }.reduce(0, +) / Float(verts.count)
             let holeR = max(0.008, avgDist)
-            // irisR = holeR 그대로: face mesh 눈 구멍 테두리 = 홍채 경계 (ARKit 정밀 측정)
-            let irisR = holeR
-            // eyeR = 안구 전체 반경 (홍채보다 1.65× 커서 눈꺼풀 뒤 공막까지 표현)
-            let eyeR  = holeR * 1.65
-            let d = eyeR * 1.1
+
+            // eyeR = 안구 전체 반경 (공막 포함, holeR 기준 1.65×)
+            let eyeR = holeR * 1.65
+
+            // 홍채 반경: eyeR 비례 (이전 0.46 너무 큼, Y-range 너무 작음 → 중간값 0.38)
+            let irisR = eyeR * 0.38
+            let eyeDepthFactor: Float = 0.95  // 클수록 뒤로, 작을수록 정면으로
+            let d = eyeR * eyeDepthFactor
             let eyeCenter = SIMD3<Float>(center.x, center.y, center.z - d)
             return (eyeCenter, eyeR, irisR)
         }
