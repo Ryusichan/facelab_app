@@ -18,7 +18,7 @@ struct InputMethodView: View {
                     .foregroundStyle(Color.accentColor)
                 Text("얼굴을 스캔하세요")
                     .font(.title2.bold())
-                Text("3D 얼굴 모델을 만들고 가상 메이크업을 적용해보세요")
+                Text("TrueDepth 카메라로 실제 얼굴 데이터를 기반으로\n정밀한 3D 메이크업 모델을 생성합니다")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -27,26 +27,15 @@ struct InputMethodView: View {
 
             Spacer()
 
-            // 입력 방식 카드
+            // ARKit 촬영 (유일한 입력)
             VStack(spacing: 16) {
-                // 카메라 촬영 (메인 CTA)
                 InputMethodCard(
                     icon: "camera.fill",
                     title: "카메라로 촬영",
-                    subtitle: "TrueDepth 카메라로 정밀한 3D 스캔",
+                    subtitle: "TrueDepth 카메라로 실제 얼굴형 기반 3D 스캔",
                     isPrimary: true
                 ) {
                     router.goTo(.faceCapture)
-                }
-
-                // 사진 선택 (보조)
-                InputMethodCard(
-                    icon: "photo.on.rectangle",
-                    title: "사진에서 선택",
-                    subtitle: "앨범의 사진으로 기본 3D 모델 생성",
-                    isPrimary: false
-                ) {
-                    router.goTo(.photoPicker)
                 }
             }
             .padding(.horizontal, 24)
@@ -54,7 +43,7 @@ struct InputMethodView: View {
             Spacer()
 
             // 안내 텍스트
-            Text("카메라 촬영 시 더 정밀한 3D 모델이 생성됩니다")
+            Text("실제 얼굴 데이터로 정확한 3D 모델이 생성됩니다")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
                 .padding(.bottom, 40)
