@@ -461,20 +461,20 @@ struct FaceSceneContainer: UIViewRepresentable {
     // 홍채 색상은 촬영 시 카메라 이미지에서 샘플링한 실제 색상 사용
     // ──────────────────────────────────────────
     static func addEyeballs(to scene: SCNScene, scanData: FaceScanData) {
-        let eyes: [(SIMD3<Float>?, Float, UIColor, String)] = [
-            (scanData.leftEyePosition,  scanData.leftEyeHoleRadius,  scanData.leftIrisColor,  "eye_left"),
-            (scanData.rightEyePosition, scanData.rightEyeHoleRadius, scanData.rightIrisColor, "eye_right")
+        let eyes: [(SIMD3<Float>?, Float, Float, UIColor, String)] = [
+            (scanData.leftEyePosition,  scanData.leftEyeHoleRadius,  scanData.leftIrisRadius,  scanData.leftIrisColor,  "eye_left"),
+            (scanData.rightEyePosition, scanData.rightEyeHoleRadius, scanData.rightIrisRadius, scanData.rightIrisColor, "eye_right")
         ]
-        for (position, holeRadius, irisColor, name) in eyes {
+        for (position, holeRadius, irisRadius, irisColor, name) in eyes {
             guard let pos = position else { continue }
-            let eyeNode = makeEyeballNode(irisColor: irisColor, holeRadius: holeRadius)
+            let eyeNode = makeEyeballNode(irisColor: irisColor, holeRadius: holeRadius, irisRadius: irisRadius)
             eyeNode.name = name
             eyeNode.simdPosition = pos
             scene.rootNode.addChildNode(eyeNode)
         }
     }
 
-    static func makeEyeballNode(irisColor: UIColor, holeRadius: Float = 0.011) -> SCNNode {
+    static func makeEyeballNode(irisColor: UIColor, holeRadius: Float = 0.011, irisRadius: Float = 0.006) -> SCNNode {
         let eyeNode = SCNNode()
         let eyeRadius = CGFloat(holeRadius)
 
@@ -493,10 +493,9 @@ struct FaceSceneContainer: UIViewRepresentable {
         eyeNode.addChildNode(SCNNode(geometry: sclera))
 
         // ── 홍채 + 동공 디스크 ──
-        // SCNPlane 사용: +Z 방향을 자연스럽게 향해 UV 매핑이 안정적
-        // SCNCylinder의 캡 UV 문제(중심 흰색 공백)를 원천 차단
-        let irisRadius = eyeRadius * 0.60
-        let irisDisk = SCNPlane(width: irisRadius * 2, height: irisRadius * 2)
+        // 카메라 이미지 픽셀 스캔으로 측정한 실제 홍채 반경 사용 (인물별 정확한 크기)
+        let irisPlaneR = CGFloat(irisRadius)
+        let irisDisk = SCNPlane(width: irisPlaneR * 2, height: irisPlaneR * 2)
         let irisMat = SCNMaterial()
         irisMat.lightingModel = .blinn
         irisMat.diffuse.contents  = makeEyeTexture(irisColor: irisColor)

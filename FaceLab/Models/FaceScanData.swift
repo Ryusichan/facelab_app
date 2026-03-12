@@ -28,12 +28,15 @@ struct FaceScanData: Equatable {
 
     // 눈 데이터 (face mesh 경계 에지 분석으로 산출 — face-local 좌표계)
     // - leftEyePosition / rightEyePosition: 눈 구멍 테두리 정점 무게중심 (안구 배치 위치)
-    // - leftEyeHoleRadius / rightEyeHoleRadius: 눈 구멍 반경 (안구 크기 결정)
+    // - leftEyeHoleRadius / rightEyeHoleRadius: 눈 구멍 반경 × 1.65 (안구 전체 반경)
+    // - leftIrisRadius / rightIrisRadius: 카메라 이미지 픽셀 스캔으로 측정한 실제 홍채 반경 (미터)
     // - leftIrisColor / rightIrisColor: 촬영 시 카메라에서 샘플링한 홍채 색상
     let leftEyePosition:    SIMD3<Float>?
     let rightEyePosition:   SIMD3<Float>?
     let leftEyeHoleRadius:  Float
     let rightEyeHoleRadius: Float
+    let leftIrisRadius:     Float
+    let rightIrisRadius:    Float
     let leftIrisColor:  UIColor
     let rightIrisColor: UIColor
 
@@ -121,6 +124,18 @@ struct FaceScanData: Equatable {
                                         camera: frame.camera,
                                         capturedImage: frame.capturedImage)
 
+        // ── 실제 홍채 반경 측정 ──
+        // 카메라 이미지에서 홍채 경계(limbal ring)를 픽셀 스캔 → 미터 환산
+        let fallbackIrisR = eyeHoles.leftRadius * (1.0 / 1.65) * 0.92
+        let leftIrisR  = measureIrisRadius(eyeWorldPos: leftEyeWorld,
+                                           camera: frame.camera,
+                                           capturedImage: frame.capturedImage,
+                                           fallback: fallbackIrisR)
+        let rightIrisR = measureIrisRadius(eyeWorldPos: rightEyeWorld,
+                                           camera: frame.camera,
+                                           capturedImage: frame.capturedImage,
+                                           fallback: fallbackIrisR)
+
         let texture = bakeTexture(
             vertices: vertices,
             uvCoordinates: uvs,
@@ -141,8 +156,10 @@ struct FaceScanData: Equatable {
             rightEyePosition:   eyeHoles.rightPos,
             leftEyeHoleRadius:  eyeHoles.leftRadius,
             rightEyeHoleRadius: eyeHoles.rightRadius,
-            leftIrisColor:  leftIris,
-            rightIrisColor: rightIris
+            leftIrisRadius:     leftIrisR,
+            rightIrisRadius:    rightIrisR,
+            leftIrisColor:      leftIris,
+            rightIrisColor:     rightIris
         )
     }
 
@@ -324,6 +341,80 @@ struct FaceScanData: Equatable {
     }
 
     // ──────────────────────────────────────────
+    // MARK: 홍채 반경 측정 (카메라 이미지 픽셀 스캔)
+    //
+    // 알고리즘:
+    //   1. 안구 중심을 portrait 이미지에 투영
+    //   2. 8방향 ray를 쏴서 어두운 홍채 → 밝은 공막 경계를 탐색
+    //   3. 평균 픽셀 반경 산출
+    //   4. 1mm 오프셋 두 점을 투영해 픽셀/미터 스케일 계산 → 미터 환산
+    //   5. 실패 시 fallback 반환 (face mesh holeR 기반)
+    // ──────────────────────────────────────────
+    private static func measureIrisRadius(
+        eyeWorldPos: SIMD3<Float>,
+        camera: ARCamera,
+        capturedImage: CVPixelBuffer,
+        fallback: Float
+    ) -> Float {
+        let ciImage = CIImage(cvPixelBuffer: capturedImage).oriented(.right)
+        let ciCtx = CIContext(options: [.useSoftwareRenderer: false])
+        guard let cgImage = ciCtx.createCGImage(ciImage, from: ciImage.extent) else { return fallback }
+
+        let imgW = cgImage.width, imgH = cgImage.height
+        guard imgW > 0, imgH > 0 else { return fallback }
+        let viewport = CGSize(width: Double(imgW), height: Double(imgH))
+
+        let sp = camera.projectPoint(eyeWorldPos, orientation: .portrait, viewportSize: viewport)
+        let cx = Int(sp.x), cy = Int(sp.y)
+        guard cx > 40, cy > 40, cx < imgW - 40, cy < imgH - 40 else { return fallback }
+
+        guard let provider = cgImage.dataProvider,
+              let data = provider.data,
+              let bytes = CFDataGetBytePtr(data) else { return fallback }
+        let bpp = max(3, cgImage.bitsPerPixel / 8)
+        let bpr = cgImage.bytesPerRow
+
+        // 8방향 ray — 홍채(어두움)에서 공막(밝음)으로 전환되는 픽셀 위치 탐색
+        var irisPixelRadii: [Float] = []
+        for i in 0..<8 {
+            let angle = Float(i) * Float.pi / 4
+            for r in 4..<120 {
+                let px = cx + Int(Float(r) * cos(angle))
+                let py = cy + Int(Float(r) * sin(angle))
+                guard px >= 0, px < imgW, py >= 0, py < imgH else { break }
+                let off = py * bpr + px * bpp
+                let brightness = (Float(bytes[off]) + Float(bytes[off+1]) + Float(bytes[off+2])) / 3.0
+                // 150 이상 = 공막 또는 피부 (밝음)
+                if brightness > 150 {
+                    irisPixelRadii.append(Float(r))
+                    break
+                }
+            }
+        }
+        // 최소 4방향 탐지 성공해야 신뢰 가능
+        guard irisPixelRadii.count >= 4 else { return fallback }
+
+        // 이상치 제거: 중앙값 ±40% 범위만 사용
+        let sorted = irisPixelRadii.sorted()
+        let median = sorted[sorted.count / 2]
+        let filtered = irisPixelRadii.filter { abs($0 - median) < median * 0.4 }
+        guard !filtered.isEmpty else { return fallback }
+        let avgPixelR = filtered.reduce(0, +) / Float(filtered.count)
+
+        // 픽셀 → 미터 변환: 1mm 오프셋 두 점을 투영해 픽셀/미터 스케일 산출
+        let sp0 = camera.projectPoint(eyeWorldPos,
+                                      orientation: .portrait, viewportSize: viewport)
+        let sp1 = camera.projectPoint(eyeWorldPos + SIMD3<Float>(0.001, 0, 0),
+                                      orientation: .portrait, viewportSize: viewport)
+        let pxPerMm = Float(hypot(sp1.x - sp0.x, sp1.y - sp0.y))
+        guard pxPerMm > 0.5 else { return fallback }
+
+        let irisMeters = (avgPixelR / pxPerMm) * 0.001  // mm → m
+        // 인체 홍채 반경 범위: 4.5 ~ 8.5mm 로 클램프
+        return max(0.0045, min(0.0085, irisMeters))
+    }
+
+    // ──────────────────────────────────────────
     // MARK: 스무스 법선 계산
     // ──────────────────────────────────────────
     private static func smoothNormals(verts: [SIMD3<Float>], idxs: [Int16]) -> [SIMD3<Float>] {
@@ -353,6 +444,8 @@ struct FaceScanData: Equatable {
             rightEyePosition:   nil,
             leftEyeHoleRadius:  0.011,
             rightEyeHoleRadius: 0.011,
+            leftIrisRadius:     0.006,
+            rightIrisRadius:    0.006,
             leftIrisColor:  UIColor(red: 0.40, green: 0.25, blue: 0.12, alpha: 1),
             rightIrisColor: UIColor(red: 0.40, green: 0.25, blue: 0.12, alpha: 1)
         )
