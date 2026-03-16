@@ -166,35 +166,225 @@ enum BrushType: String, CaseIterable, Identifiable {
 }
 
 // ============================================================
+// MARK: - Makeup Tool
+// 부위별 선택 가능한 메이크업 도구 (20종)
+// ============================================================
+enum MakeupTool: String, CaseIterable, Identifiable {
+    case foundationBrush = "파운데이션 브러쉬"
+    case airbrush        = "에어브러쉬"
+    case blend           = "블렌드"
+    case smooth          = "스무드"
+    case foundation      = "파운데이션"
+    case highlight       = "하이라이트"
+    case contour         = "컨투어"
+    case browPencil      = "브로우 펜슬"
+    case browBrush       = "브로우 브러쉬"
+    case browPowder      = "브로우 파우더"
+    case browGel         = "브로우 젤"
+    case eyeshadow       = "아이섀도우"
+    case blendBrush      = "블렌드 브러쉬"
+    case smudge          = "스머지"
+    case eyeliner        = "아이라이너"
+    case detail          = "디테일"
+    case lipBrush        = "립 브러쉬"
+    case lipPencil       = "립 펜슬"
+    case gloss           = "글로스"
+    case blusher         = "블러셔"
+
+    var id: String { rawValue }
+    var shortLabel: String { rawValue }
+
+    var icon: String {
+        switch self {
+        case .foundationBrush, .foundation: return "paintbrush.fill"
+        case .airbrush:      return "aqi.medium"
+        case .blend:         return "scribble.variable"
+        case .smooth:        return "seal.fill"
+        case .highlight:     return "sparkle"
+        case .contour:       return "oval"
+        case .browPencil:    return "pencil"
+        case .browBrush:     return "paintbrush.pointed.fill"
+        case .browPowder:    return "circle.fill"
+        case .browGel:       return "drop.fill"
+        case .eyeshadow:     return "eye.fill"
+        case .blendBrush:    return "paintbrush.fill"
+        case .smudge:        return "scribble.variable"
+        case .eyeliner:      return "pencil.line"
+        case .detail:        return "pencil"
+        case .lipBrush:      return "mouth.fill"
+        case .lipPencil:     return "pencil.tip"
+        case .gloss:         return "drop.fill"
+        case .blusher:       return "circle.lefthalf.filled"
+        }
+    }
+
+    var maxAlpha: CGFloat {
+        switch self {
+        case .eyeliner, .browPencil, .lipPencil, .detail: return 0.90
+        case .eyeshadow, .browPowder:              return 0.72
+        case .foundationBrush, .foundation:        return 0.35
+        case .lipBrush, .gloss:                    return 0.85
+        case .blusher:                             return 0.55
+        case .highlight:                           return 0.50
+        case .contour:                             return 0.60
+        case .browBrush, .browGel:                 return 0.65
+        case .airbrush:                            return 0.28
+        case .blend, .blendBrush:                  return 0.22
+        case .smooth:                              return 0.15
+        case .smudge:                              return 0.48
+        }
+    }
+
+    var isHardEdge: Bool {
+        switch self {
+        case .eyeliner, .browPencil, .lipPencil, .detail: return true
+        default: return false
+        }
+    }
+
+    var colorPresets: [Color] {
+        switch self {
+        case .foundationBrush, .foundation, .smooth, .airbrush:
+            return [
+                Color(red: 0.96, green: 0.90, blue: 0.82),
+                Color(red: 0.92, green: 0.83, blue: 0.73),
+                Color(red: 0.87, green: 0.75, blue: 0.65),
+                Color(red: 0.80, green: 0.67, blue: 0.55),
+                Color(red: 0.72, green: 0.58, blue: 0.45),
+                Color(red: 0.60, green: 0.47, blue: 0.35),
+            ]
+        case .blend, .blendBrush:
+            return [
+                Color(red: 0.96, green: 0.90, blue: 0.82),
+                Color(red: 0.92, green: 0.83, blue: 0.73),
+                Color(red: 0.87, green: 0.75, blue: 0.65),
+                Color(red: 0.80, green: 0.67, blue: 0.55),
+                Color(red: 0.72, green: 0.58, blue: 0.45),
+                Color(red: 0.95, green: 0.92, blue: 0.88),
+            ]
+        case .highlight:
+            return [
+                Color(red: 0.98, green: 0.95, blue: 0.88),
+                Color(red: 0.96, green: 0.88, blue: 0.70),
+                Color(red: 0.88, green: 0.72, blue: 0.42),
+                Color(red: 0.95, green: 0.92, blue: 0.88),
+                Color(red: 0.85, green: 0.85, blue: 0.92),
+                Color(red: 0.98, green: 0.82, blue: 0.90),
+            ]
+        case .contour:
+            return [
+                Color(red: 0.65, green: 0.50, blue: 0.38),
+                Color(red: 0.55, green: 0.40, blue: 0.30),
+                Color(red: 0.45, green: 0.35, blue: 0.28),
+                Color(red: 0.38, green: 0.28, blue: 0.22),
+                Color(red: 0.60, green: 0.48, blue: 0.42),
+                Color(red: 0.70, green: 0.58, blue: 0.50),
+            ]
+        case .browPencil, .browBrush, .browPowder, .browGel:
+            return [
+                Color(red: 0.35, green: 0.25, blue: 0.18),
+                Color(red: 0.50, green: 0.38, blue: 0.28),
+                Color(red: 0.62, green: 0.48, blue: 0.36),
+                Color(red: 0.25, green: 0.18, blue: 0.12),
+                Color(red: 0.15, green: 0.10, blue: 0.08),
+                Color(red: 0.70, green: 0.58, blue: 0.45),
+            ]
+        case .eyeshadow, .smudge:
+            return [
+                Color(red: 0.70, green: 0.55, blue: 0.80),
+                Color(red: 0.30, green: 0.25, blue: 0.50),
+                Color(red: 0.55, green: 0.40, blue: 0.30),
+                Color(red: 0.15, green: 0.35, blue: 0.60),
+                Color(red: 0.15, green: 0.15, blue: 0.15),
+                Color(red: 0.85, green: 0.70, blue: 0.55),
+            ]
+        case .eyeliner, .detail:
+            return [
+                Color(red: 0.08, green: 0.08, blue: 0.10),
+                Color(red: 0.28, green: 0.20, blue: 0.15),
+                Color(red: 0.12, green: 0.18, blue: 0.40),
+                Color(red: 0.55, green: 0.40, blue: 0.20),
+                Color(red: 0.45, green: 0.42, blue: 0.48),
+                Color(red: 0.82, green: 0.68, blue: 0.30),
+            ]
+        case .lipBrush, .lipPencil, .gloss:
+            return [
+                Color(red: 0.92, green: 0.78, blue: 0.72),
+                Color(red: 0.90, green: 0.55, blue: 0.60),
+                Color(red: 0.95, green: 0.45, blue: 0.20),
+                Color(red: 0.85, green: 0.10, blue: 0.20),
+                Color(red: 0.70, green: 0.15, blue: 0.20),
+                Color(red: 0.95, green: 0.75, blue: 0.80),
+            ]
+        case .blusher:
+            return [
+                Color(red: 0.95, green: 0.78, blue: 0.72),
+                Color(red: 0.95, green: 0.60, blue: 0.65),
+                Color(red: 0.90, green: 0.50, blue: 0.45),
+                Color(red: 0.85, green: 0.45, blue: 0.55),
+                Color(red: 0.80, green: 0.35, blue: 0.45),
+                Color(red: 0.95, green: 0.85, blue: 0.78),
+            ]
+        }
+    }
+}
+
+// ============================================================
+// MARK: - Tool Layer State
+// ============================================================
+struct ToolLayerState {
+    var tool: MakeupTool
+    var selectedColor: Color
+    var intensity: Double   // 0.0 ~ 1.0
+    var brushSize: Double   // 0.0 ~ 1.0
+
+    init(tool: MakeupTool) {
+        self.tool = tool
+        self.selectedColor = tool.colorPresets[0]
+        self.intensity = 0.5
+        self.brushSize = 0.3
+    }
+}
+
+// ============================================================
 // MARK: - Face Region
-// 5종: 눈/코/입/턱/전체 — 각 영역에 필요한 화장품 매핑
+// 8종: 전체/이마/눈썹/눈/코/입술/볼/턱
 // ============================================================
 enum FaceRegion: String, CaseIterable, Identifiable {
-    case eye   = "눈"
-    case nose  = "코"
-    case mouth = "입"
-    case jaw   = "턱"
-    case full  = "전체"
+    case full     = "전체"
+    case forehead = "이마"
+    case eyebrow  = "눈썹"
+    case eye      = "눈"
+    case nose     = "코"
+    case lip      = "입술"
+    case cheek    = "볼"
+    case jaw      = "턱"
 
     var id: String { rawValue }
 
-    var products: [MakeupCategory] {
+    var tools: [MakeupTool] {
         switch self {
-        case .eye:   return [.eyeShadow, .eyeliner]
-        case .nose:  return [.highlight, .foundation]
-        case .mouth: return [.lip]
-        case .jaw:   return [.foundation, .highlight]
-        case .full:  return [.foundation, .blush, .highlight]
+        case .full:     return [.foundationBrush, .airbrush, .blend, .smooth]
+        case .forehead: return [.foundation, .highlight, .contour, .blend]
+        case .eyebrow:  return [.browPencil, .browBrush, .browPowder, .browGel]
+        case .eye:      return [.eyeshadow, .blendBrush, .smudge, .eyeliner, .detail]
+        case .nose:     return [.contour, .highlight, .blend, .detail]
+        case .lip:      return [.lipBrush, .lipPencil, .gloss, .blend]
+        case .cheek:    return [.blusher, .airbrush, .highlight, .blend]
+        case .jaw:      return [.contour, .blend, .highlight]
         }
     }
 
     var icon: String {
         switch self {
-        case .eye:   return "eye.fill"
-        case .nose:  return "nose.fill"
-        case .mouth: return "mouth.fill"
-        case .jaw:   return "person.fill"
-        case .full:  return "face.smiling.fill"
+        case .full:     return "face.smiling.fill"
+        case .forehead: return "arrow.up.circle.fill"
+        case .eyebrow:  return "eyebrow"
+        case .eye:      return "eye.fill"
+        case .nose:     return "nose"
+        case .lip:      return "mouth.fill"
+        case .cheek:    return "oval.fill"
+        case .jaw:      return "arrow.down.circle.fill"
         }
     }
 }
@@ -259,6 +449,28 @@ enum MakeupTextureRenderer {
                 }
             }
         }
+    }
+
+    // MakeupTool 기반 브러시 스트로크 페인팅
+    static func drawBrushStroke(ctx: CGContext, rect: CGRect, color: UIColor,
+                                 intensity: CGFloat, maxAlpha: CGFloat, isHardEdge: Bool) {
+        let steps = 16
+        ctx.saveGState()
+        for i in stride(from: steps, through: 1, by: -1) {
+            let t = CGFloat(i) / CGFloat(steps)
+            let alpha: CGFloat = isHardEdge
+                ? max(0, (t - 0.35) / 0.65) * intensity * maxAlpha
+                : t * t * intensity * maxAlpha
+            let insetX = rect.width  * (1.0 - t) * 0.5
+            let insetY = rect.height * (1.0 - t) * 0.5
+            let stepRect = rect.insetBy(dx: insetX, dy: insetY)
+            color.withAlphaComponent(alpha).setFill()
+            let path: UIBezierPath = isHardEdge
+                ? UIBezierPath(roundedRect: stepRect, cornerRadius: stepRect.height * 0.3)
+                : UIBezierPath(ovalIn: stepRect)
+            path.fill()
+        }
+        ctx.restoreGState()
     }
 
     static func drawSoftMakeup(

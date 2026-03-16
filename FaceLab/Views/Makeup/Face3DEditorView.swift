@@ -58,7 +58,7 @@ struct Face3DEditorView: View {
         .sheet(isPresented: $showColorPicker) { colorPickerSheet }
         .animation(.easeInOut(duration: 0.15), value: viewModel.showCaptureFlash)
         .animation(.easeInOut(duration: 0.2),  value: viewModel.isBeforeMode)
-        .animation(.spring(response: 0.28),    value: viewModel.selectedCategory)
+        .animation(.spring(response: 0.28),    value: viewModel.selectedTool)
         .animation(.spring(response: 0.28),    value: viewModel.selectedRegion)
         .animation(.spring(response: 0.28),    value: viewModel.interactionMode)
     }
@@ -104,7 +104,7 @@ struct Face3DEditorView: View {
         let isSelected = viewModel.selectedRegion == region
         return Button {
             viewModel.selectedRegion = region
-            viewModel.selectedCategory = nil
+            viewModel.selectedTool = nil
         } label: {
             VStack(spacing: 3) {
                 Image(systemName: region.icon)
@@ -134,9 +134,9 @@ struct Face3DEditorView: View {
                     .frame(width: 30, height: 1)
                     .padding(.vertical, 2)
 
-                // 선택된 부위에 해당하는 화장품
-                ForEach(viewModel.selectedRegion.products) { category in
-                    productCell(category)
+                // 선택된 부위에 해당하는 도구
+                ForEach(viewModel.selectedRegion.tools) { tool in
+                    toolPickerCell(tool)
                 }
             }
             .padding(.vertical, 5)
@@ -149,7 +149,7 @@ struct Face3DEditorView: View {
         let isSelected = viewModel.interactionMode == .rotate
         return Button {
             viewModel.interactionMode = .rotate
-            viewModel.selectedCategory = nil
+            viewModel.selectedTool = nil
         } label: {
             VStack(spacing: 3) {
                 RotateHandIcon(isSelected: isSelected, accent: accent)
@@ -164,23 +164,24 @@ struct Face3DEditorView: View {
         }
     }
 
-    private func productCell(_ category: MakeupCategory) -> some View {
-        let isSelected = viewModel.selectedCategory == category
+    private func toolPickerCell(_ tool: MakeupTool) -> some View {
+        let isSelected = viewModel.selectedTool == tool
         return Button {
-            viewModel.selectedCategory = category
+            viewModel.selectedTool = tool
             viewModel.interactionMode = .paint
         } label: {
             VStack(spacing: 3) {
-                Image(systemName: category.icon)
+                Image(systemName: tool.icon)
                     .font(.system(size: 15, weight: .medium))
                     .foregroundStyle(isSelected ? accent : .white.opacity(0.50))
                     .frame(height: 18)
-                Text(category.shortLabel)
-                    .font(.system(size: 6, weight: .bold))
+                Text(tool.shortLabel)
+                    .font(.system(size: 5.5, weight: .bold))
                     .foregroundStyle(isSelected ? accent : .white.opacity(0.38))
-                    .lineLimit(1).minimumScaleFactor(0.8)
+                    .lineLimit(2).minimumScaleFactor(0.7)
+                    .multilineTextAlignment(.center)
             }
-            .frame(width: 46, height: 46)
+            .frame(width: 46, height: 50)
             .background(cellBG(isSelected))
         }
     }
@@ -202,7 +203,7 @@ struct Face3DEditorView: View {
     // ── Bottom Panel ──
     private var bottomPanel: some View {
         VStack(spacing: 0) {
-            if let category = viewModel.selectedCategory {
+            if let tool = viewModel.selectedTool {
                 // Color Palette
                 HStack(spacing: 8) {
                     Text("Color")
@@ -219,8 +220,8 @@ struct Face3DEditorView: View {
 
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 6) {
-                            ForEach(category.colorPresets.indices, id: \.self) { i in
-                                let color = category.colorPresets[i]
+                            ForEach(tool.colorPresets.indices, id: \.self) { i in
+                                let color = tool.colorPresets[i]
                                 let sel = viewModel.isColorSelected(color)
                                 Circle().fill(color)
                                     .frame(width: 26, height: 26)
@@ -248,14 +249,14 @@ struct Face3DEditorView: View {
                 // 슬라이더 2개
                 VStack(spacing: 6) {
                     sliderRow(icon: "paintbrush.pointed.fill", label: "Brush Size",
-                              value: Binding(get: { viewModel.currentLayer.brushSize },
+                              value: Binding(get: { viewModel.currentToolState.brushSize },
                                              set: { viewModel.setBrushSize($0) }),
-                              display: "\(Int(viewModel.currentLayer.brushSize * 100))px")
+                              display: "\(Int(viewModel.currentToolState.brushSize * 100))px")
 
                     sliderRow(icon: "drop.fill", label: "Opacity",
-                              value: Binding(get: { viewModel.currentLayer.intensity },
+                              value: Binding(get: { viewModel.currentToolState.intensity },
                                              set: { viewModel.setIntensity($0) }),
-                              display: "\(Int(viewModel.currentLayer.intensity * 100))%")
+                              display: "\(Int(viewModel.currentToolState.intensity * 100))%")
                 }
                 .padding(.top, 8)
             } else {
@@ -979,8 +980,7 @@ struct FaceSceneContainer: UIViewRepresentable {
             ])
             guard let hit = hits.first(where: { $0.node === viewModel.faceNode }) else { return }
             let uv = hit.textureCoordinates(withMappingChannel: 0)
-            // Y축 반전: SceneKit UV는 Y=0이 하단, UIKit 렌더링은 Y=0이 상단
-            viewModel.paintAtUV(uv: CGPoint(x: CGFloat(uv.x), y: 1.0 - CGFloat(uv.y)))
+            viewModel.paintAtUV(uv: CGPoint(x: CGFloat(uv.x), y: CGFloat(uv.y)))
         }
 
         @MainActor
@@ -1024,24 +1024,21 @@ struct FaceSceneContainer: UIViewRepresentable {
 
 // ============================================================
 // MARK: - FaceEditorViewModel
-// 3D 뷰어 상태 + orbit 카메라 + 메이크업 합성
+// 3D 뷰어 상태 + orbit 카메라 + 직접 페인팅
 // ============================================================
 @MainActor
 class FaceEditorViewModel: ObservableObject {
     let scanData: FaceScanData
 
     // MARK: Published State
-    @Published var selectedCategory: MakeupCategory? = nil
+    @Published var selectedTool: MakeupTool? = nil
     @Published var selectedRegion: FaceRegion = .full
     @Published var interactionMode: InteractionMode = .rotate
-    @Published var selectedBrushType: BrushType = .brush
-    @Published var layers: [MakeupCategory: MakeupLayerState] = {
-        Dictionary(uniqueKeysWithValues: MakeupCategory.allCases.map {
-            ($0, MakeupLayerState(category: $0))
-        })
-    }()
     @Published var isBeforeMode = false
     @Published var showCaptureFlash = false
+
+    // MARK: Tool States (per-tool color/size/opacity)
+    var toolStates: [MakeupTool: ToolLayerState] = [:]
 
     // MARK: Paint Canvas
     private var paintCanvasImage: UIImage? = nil
@@ -1064,39 +1061,33 @@ class FaceEditorViewModel: ObservableObject {
     }
 
     // MARK: Computed
-    var currentLayer: MakeupLayerState {
-        guard let cat = selectedCategory else { return MakeupLayerState(category: .lip) }
-        return layers[cat] ?? MakeupLayerState(category: cat)
+    var currentToolState: ToolLayerState {
+        guard let tool = selectedTool else { return ToolLayerState(tool: .blend) }
+        return toolStates[tool] ?? ToolLayerState(tool: tool)
     }
 
     func isColorSelected(_ color: Color) -> Bool {
-        guard let cat = selectedCategory, let stored = layers[cat] else { return false }
-        return UIColor(stored.selectedColor).isApproximatelyEqual(to: UIColor(color))
+        guard let tool = selectedTool, let state = toolStates[tool] else { return false }
+        return UIColor(state.selectedColor).isApproximatelyEqual(to: UIColor(color))
     }
 
     // MARK: Actions
     func setColor(_ color: Color) {
-        guard let cat = selectedCategory else { return }
-        layers[cat]?.selectedColor = color
-        applyMakeupTexture()
+        guard let tool = selectedTool else { return }
+        if toolStates[tool] == nil { toolStates[tool] = ToolLayerState(tool: tool) }
+        toolStates[tool]?.selectedColor = color
     }
 
     func setIntensity(_ intensity: Double) {
-        guard let cat = selectedCategory else { return }
-        layers[cat]?.intensity = intensity
-        applyMakeupTexture()
+        guard let tool = selectedTool else { return }
+        if toolStates[tool] == nil { toolStates[tool] = ToolLayerState(tool: tool) }
+        toolStates[tool]?.intensity = intensity
     }
 
     func setBrushSize(_ size: Double) {
-        guard let cat = selectedCategory else { return }
-        layers[cat]?.brushSize = size
-        applyMakeupTexture()
-    }
-
-    func setEnabled(_ enabled: Bool) {
-        guard let cat = selectedCategory else { return }
-        layers[cat]?.isEnabled = enabled
-        applyMakeupTexture()
+        guard let tool = selectedTool else { return }
+        if toolStates[tool] == nil { toolStates[tool] = ToolLayerState(tool: tool) }
+        toolStates[tool]?.brushSize = size
     }
 
     func toggleBeforeAfter() {
@@ -1105,16 +1096,14 @@ class FaceEditorViewModel: ObservableObject {
     }
 
     func reset() {
-        for cat in MakeupCategory.allCases {
-            layers[cat] = MakeupLayerState(category: cat)
-        }
+        toolStates.removeAll()
         paintCanvasImage = nil
         applyMakeupTexture()
     }
 
     func paintAtUV(uv: CGPoint) {
-        guard let category = selectedCategory else { return }
-        let state = layers[category] ?? MakeupLayerState(category: category)
+        guard let tool = selectedTool else { return }
+        let state = toolStates[tool] ?? ToolLayerState(tool: tool)
         let brushPx = CGFloat(state.brushSize * 60 + 8)
         let pixelX = uv.x * 1024
         let pixelY = uv.y * 1024
@@ -1125,11 +1114,12 @@ class FaceEditorViewModel: ObservableObject {
             paintCanvasImage?.draw(at: .zero)
             let rect = CGRect(x: pixelX - brushPx, y: pixelY - brushPx,
                               width: brushPx * 2, height: brushPx * 2)
-            MakeupTextureRenderer.drawSoftMakeup(
+            MakeupTextureRenderer.drawBrushStroke(
                 ctx: ctx.cgContext, rect: rect,
                 color: UIColor(state.selectedColor),
                 intensity: CGFloat(state.intensity),
-                category: category
+                maxAlpha: tool.maxAlpha,
+                isHardEdge: tool.isHardEdge
             )
         }
         paintCanvasImage = result
@@ -1152,7 +1142,8 @@ class FaceEditorViewModel: ObservableObject {
     }
 
     // ──────────────────────────────────────────
-    // MARK: 메이크업 텍스처 합성
+    // MARK: 텍스처 적용 (페인트 캔버스만)
+    // 자동 레이어 렌더링 없음 — 직접 터치로 칠한 것만 표시
     // ──────────────────────────────────────────
     func applyMakeupTexture() {
         guard let faceNode = faceNode else { return }
@@ -1164,29 +1155,25 @@ class FaceEditorViewModel: ObservableObject {
             return
         }
 
-        let makeupOverlay = MakeupTextureRenderer.render(layers: Array(layers.values))
-        let result = compositeAll(base: scanData.faceTexture, makeup: makeupOverlay, paint: paintCanvasImage)
+        guard let paint = paintCanvasImage else {
+            faceNode.geometry?.firstMaterial?.diffuse.contents =
+                scanData.faceTexture ?? skinFallback
+            return
+        }
 
-        faceNode.geometry?.firstMaterial?.diffuse.contents =
-            result ?? scanData.faceTexture ?? skinFallback
-    }
-
-    private func compositeAll(base: UIImage?, makeup: UIImage?, paint: UIImage?) -> UIImage? {
-        guard makeup != nil || paint != nil else { return base }
         let size = CGSize(width: 1024, height: 1024)
         let format = UIGraphicsImageRendererFormat()
         format.scale = 1; format.opaque = true
-
-        return UIGraphicsImageRenderer(size: size, format: format).image { _ in
-            if let base = base {
+        let result = UIGraphicsImageRenderer(size: size, format: format).image { _ in
+            if let base = scanData.faceTexture {
                 base.draw(in: CGRect(origin: .zero, size: size))
             } else {
                 UIColor(red: 0.87, green: 0.75, blue: 0.65, alpha: 1).setFill()
                 UIBezierPath(rect: CGRect(origin: .zero, size: size)).fill()
             }
-            makeup?.draw(in: CGRect(origin: .zero, size: size))
-            paint?.draw(in: CGRect(origin: .zero, size: size))
+            paint.draw(in: CGRect(origin: .zero, size: size))
         }
+        faceNode.geometry?.firstMaterial?.diffuse.contents = result
     }
 
     // MARK: Capture
