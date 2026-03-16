@@ -72,7 +72,7 @@ struct Face3DEditorView: View {
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(.white.opacity(0.85))
             Spacer()
-            Button { viewModel.resetCamera() } label: { iconButton("arrow.triangle.2.circlepath.camera") }
+            Button { viewModel.resetAll(); viewModel.resetCamera() } label: { iconButton("arrow.triangle.2.circlepath.camera") }
             Button { viewModel.capturePhoto()  } label: { iconButton("square.and.arrow.up") }
         }
         .padding(.horizontal, 12)
@@ -224,12 +224,21 @@ struct Face3DEditorView: View {
                             ForEach(tool.colorPresets.indices, id: \.self) { i in
                                 let color = tool.colorPresets[i]
                                 let sel = viewModel.isColorSelected(color)
-                                Circle().fill(color)
-                                    .frame(width: 26, height: 26)
-                                    .overlay { if sel { Circle().strokeBorder(.white, lineWidth: 2) } }
-                                    .scaleEffect(sel ? 1.10 : 1)
-                                    .animation(.spring(response: 0.2), value: sel)
-                                    .onTapGesture { viewModel.setColor(color) }
+                                ZStack {
+                                    // 선택 시 외곽 링 (accent 색상)
+                                    Circle()
+                                        .strokeBorder(sel ? accent : Color.clear, lineWidth: 2.5)
+                                        .frame(width: 32, height: 32)
+                                    Circle().fill(color)
+                                        .frame(width: 24, height: 24)
+                                        // 선택 시 내부 흰 테두리
+                                        .overlay {
+                                            Circle().strokeBorder(.white.opacity(sel ? 0.9 : 0), lineWidth: 1.5)
+                                        }
+                                }
+                                .scaleEffect(sel ? 1.12 : 1)
+                                .animation(.spring(response: 0.2), value: sel)
+                                .onTapGesture { viewModel.setColor(color) }
                             }
                         }
                     }
@@ -302,10 +311,10 @@ struct Face3DEditorView: View {
 
     private var actionBar: some View {
         HStack(spacing: 0) {
-            Button { viewModel.reset() } label: {
+            Button { viewModel.clearCurrentTool() } label: {
                 HStack(spacing: 5) {
-                    Image(systemName: "arrow.counterclockwise").font(.system(size: 11, weight: .semibold))
-                    Text("Reset").font(.system(size: 12, weight: .semibold))
+                    Image(systemName: "eraser").font(.system(size: 11, weight: .semibold))
+                    Text("Clear").font(.system(size: 12, weight: .semibold))
                 }
                 .foregroundStyle(.white.opacity(0.75))
                 .frame(height: 38)
@@ -354,28 +363,18 @@ struct Face3DEditorView: View {
 
     // 커스텀 색상 피커 시트
     private var colorPickerSheet: some View {
-        NavigationStack {
-            VStack(spacing: 24) {
-                ColorPicker("", selection: $customColor, supportsOpacity: false)
-                    .labelsHidden()
-                    .frame(width: 280, height: 280)
-                Button("적용하기") {
-                    viewModel.setColor(customColor)
-                    showColorPicker = false
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(accent)
-            }
-            .padding()
-            .navigationTitle("커스텀 색상")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("취소") { showColorPicker = false }
-                }
-            }
-        }
-        .presentationDetents([.medium])
+        CustomColorPickerSheet(
+            initialColor: customColor,
+            accent: accent,
+            onApply: { color in
+                customColor = color
+                viewModel.setColor(color)
+                showColorPicker = false
+            },
+            onCancel: { showColorPicker = false }
+        )
+        .presentationDetents([.large])
+        .presentationDragIndicator(.visible)
     }
 }
 
@@ -1075,8 +1074,8 @@ class FaceEditorViewModel: ObservableObject {
     // MARK: Tool States (per-tool color/size/opacity)
     var toolStates: [MakeupTool: ToolLayerState] = [:]
 
-    // MARK: Paint Canvas
-    private var paintCanvasImage: UIImage? = nil
+    // MARK: Paint Canvas (툴별 분리 저장 → Clear 시 해당 툴만 지움)
+    private var paintCanvasImages: [MakeupTool: UIImage] = [:]
 
     // MARK: Scene References
     weak var faceNode: SCNNode?
@@ -1102,25 +1101,31 @@ class FaceEditorViewModel: ObservableObject {
     }
 
     func isColorSelected(_ color: Color) -> Bool {
-        guard let tool = selectedTool, let state = toolStates[tool] else { return false }
-        return UIColor(state.selectedColor).isApproximatelyEqual(to: UIColor(color))
+        guard selectedTool != nil else { return false }
+        // toolStates에 값이 없으면 defaultColor(첫 번째 프리셋)와 비교
+        return UIColor(currentToolState.selectedColor).isApproximatelyEqual(to: UIColor(color))
     }
 
     // MARK: Actions
+    // toolStates는 @Published가 아니므로 변경 시 objectWillChange를 직접 트리거해야
+    // 슬라이더 값 표시 및 뷰 재렌더링이 즉시 반영됨
     func setColor(_ color: Color) {
         guard let tool = selectedTool else { return }
+        objectWillChange.send()
         if toolStates[tool] == nil { toolStates[tool] = ToolLayerState(tool: tool) }
         toolStates[tool]?.selectedColor = color
     }
 
     func setIntensity(_ intensity: Double) {
         guard let tool = selectedTool else { return }
+        objectWillChange.send()
         if toolStates[tool] == nil { toolStates[tool] = ToolLayerState(tool: tool) }
         toolStates[tool]?.intensity = intensity
     }
 
     func setBrushSize(_ size: Double) {
         guard let tool = selectedTool else { return }
+        objectWillChange.send()
         if toolStates[tool] == nil { toolStates[tool] = ToolLayerState(tool: tool) }
         toolStates[tool]?.brushSize = size
     }
@@ -1130,9 +1135,17 @@ class FaceEditorViewModel: ObservableObject {
         applyMakeupTexture()
     }
 
-    func reset() {
+    // 현재 선택된 툴의 획만 지움
+    func clearCurrentTool() {
+        guard let tool = selectedTool else { return }
+        paintCanvasImages.removeValue(forKey: tool)
+        applyMakeupTexture()
+    }
+
+    // 전체 초기화
+    func resetAll() {
         toolStates.removeAll()
-        paintCanvasImage = nil
+        paintCanvasImages.removeAll()
         applyMakeupTexture()
     }
 
@@ -1140,9 +1153,7 @@ class FaceEditorViewModel: ObservableObject {
     func paintAtUV(uv: CGPoint, applyTexture: Bool = true) {
         guard let tool = selectedTool else { return }
         let state = toolStates[tool] ?? ToolLayerState(tool: tool)
-        // 브러쉬 크기: 슬라이더 0~1 → 3~23px (기존 8~68px 대비 절반 이하)
         let brushPx = CGFloat(state.brushSize * 20 + 3)
-        // intensity 상한: 0.45 (슬라이더 MAX=1이어도 45% 강도 이상 넘지 않음)
         let clampedIntensity = CGFloat(state.intensity) * 0.45
         let pixelX = uv.x * 1024
         let pixelY = uv.y * 1024
@@ -1150,7 +1161,7 @@ class FaceEditorViewModel: ObservableObject {
         let format = UIGraphicsImageRendererFormat()
         format.scale = 1; format.opaque = false
         let result = UIGraphicsImageRenderer(size: CGSize(width: 1024, height: 1024), format: format).image { ctx in
-            paintCanvasImage?.draw(at: .zero)
+            paintCanvasImages[tool]?.draw(at: .zero)   // 해당 툴의 기존 획 위에 누적
             let rect = CGRect(x: pixelX - brushPx, y: pixelY - brushPx,
                               width: brushPx * 2, height: brushPx * 2)
             MakeupTextureRenderer.drawBrushStroke(
@@ -1161,7 +1172,7 @@ class FaceEditorViewModel: ObservableObject {
                 isHardEdge: tool.isHardEdge
             )
         }
-        paintCanvasImage = result
+        paintCanvasImages[tool] = result
         if applyTexture { applyMakeupTexture() }
     }
 
@@ -1247,23 +1258,29 @@ class FaceEditorViewModel: ObservableObject {
             return
         }
 
-        guard let paint = paintCanvasImage else {
+        let canvases = paintCanvasImages.values
+        guard !canvases.isEmpty else {
             faceNode.geometry?.firstMaterial?.diffuse.contents =
                 scanData.faceTexture ?? skinFallback
             return
         }
 
         let size = CGSize(width: 1024, height: 1024)
+        let rect = CGRect(origin: .zero, size: size)
         let format = UIGraphicsImageRendererFormat()
         format.scale = 1; format.opaque = true
         let result = UIGraphicsImageRenderer(size: size, format: format).image { _ in
+            // 베이스 피부 텍스처
             if let base = scanData.faceTexture {
-                base.draw(in: CGRect(origin: .zero, size: size))
+                base.draw(in: rect)
             } else {
                 UIColor(red: 0.87, green: 0.75, blue: 0.65, alpha: 1).setFill()
-                UIBezierPath(rect: CGRect(origin: .zero, size: size)).fill()
+                UIBezierPath(rect: rect).fill()
             }
-            paint.draw(in: CGRect(origin: .zero, size: size))
+            // 툴별 캔버스를 순서대로 합성
+            for canvas in canvases {
+                canvas.draw(in: rect)
+            }
         }
         faceNode.geometry?.firstMaterial?.diffuse.contents = result
     }
@@ -1289,4 +1306,185 @@ class FaceEditorViewModel: ObservableObject {
             }
         }
     }
+}
+
+// ============================================================
+// MARK: - CustomColorPickerSheet
+// HSB 슬라이더 기반 풀스크린 커스텀 색상 피커
+// ============================================================
+private struct CustomColorPickerSheet: View {
+    let accent: Color
+    let onApply: (Color) -> Void
+    let onCancel: () -> Void
+
+    @State private var hue: Double
+    @State private var saturation: Double
+    @State private var brightness: Double
+
+    init(initialColor: Color, accent: Color, onApply: @escaping (Color) -> Void, onCancel: @escaping () -> Void) {
+        self.accent = accent
+        self.onApply = onApply
+        self.onCancel = onCancel
+        var h: CGFloat = 0, s: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        UIColor(initialColor).getHue(&h, saturation: &s, brightness: &b, alpha: &a)
+        _hue        = State(initialValue: Double(h))
+        _saturation = State(initialValue: Double(s))
+        _brightness = State(initialValue: Double(b))
+    }
+
+    private var currentColor: Color {
+        Color(hue: hue, saturation: saturation, brightness: brightness)
+    }
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 28) {
+
+                // ── 색상 미리보기 ──
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .fill(currentColor)
+                    .frame(height: 100)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 20, style: .continuous)
+                            .strokeBorder(.white.opacity(0.15), lineWidth: 1)
+                    )
+                    .shadow(color: currentColor.opacity(0.5), radius: 12, y: 4)
+                    .padding(.horizontal, 20)
+
+                // ── HSB 슬라이더 ──
+                VStack(spacing: 20) {
+                    hsbSlider(
+                        label: "색상",
+                        value: $hue,
+                        gradient: LinearGradient(
+                            colors: stride(from: 0.0, through: 1.0, by: 0.05).map {
+                                Color(hue: $0, saturation: 1, brightness: 1)
+                            },
+                            startPoint: .leading, endPoint: .trailing
+                        )
+                    )
+                    hsbSlider(
+                        label: "채도",
+                        value: $saturation,
+                        gradient: LinearGradient(
+                            colors: [
+                                Color(hue: hue, saturation: 0, brightness: brightness),
+                                Color(hue: hue, saturation: 1, brightness: brightness)
+                            ],
+                            startPoint: .leading, endPoint: .trailing
+                        )
+                    )
+                    hsbSlider(
+                        label: "밝기",
+                        value: $brightness,
+                        gradient: LinearGradient(
+                            colors: [
+                                Color(hue: hue, saturation: saturation, brightness: 0),
+                                Color(hue: hue, saturation: saturation, brightness: 1)
+                            ],
+                            startPoint: .leading, endPoint: .trailing
+                        )
+                    )
+                }
+                .padding(.horizontal, 20)
+
+                // ── 자주 쓰는 기본 색상 ──
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("기본 색상")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 20)
+
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 10) {
+                            ForEach(quickColors, id: \.self) { color in
+                                Circle()
+                                    .fill(color)
+                                    .frame(width: 36, height: 36)
+                                    .onTapGesture { applyQuickColor(color) }
+                            }
+                        }
+                        .padding(.horizontal, 20)
+                    }
+                }
+
+                Spacer()
+
+                // ── 버튼 ──
+                HStack(spacing: 12) {
+                    Button("취소") { onCancel() }
+                        .frame(maxWidth: .infinity, minHeight: 50)
+                        .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 14))
+                        .foregroundStyle(.white)
+
+                    Button("적용") { onApply(currentColor) }
+                        .frame(maxWidth: .infinity, minHeight: 50)
+                        .background(accent, in: RoundedRectangle(cornerRadius: 14))
+                        .foregroundStyle(.white)
+                        .fontWeight(.semibold)
+                }
+                .padding(.horizontal, 20)
+                .padding(.bottom, 20)
+            }
+            .padding(.top, 20)
+            .navigationTitle("커스텀 색상")
+            .navigationBarTitleDisplayMode(.inline)
+            .background(Color(white: 0.1).ignoresSafeArea())
+        }
+        .colorScheme(.dark)
+    }
+
+    private func hsbSlider(label: String, value: Binding<Double>, gradient: LinearGradient) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(label)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(.white.opacity(0.65))
+
+            ZStack(alignment: .leading) {
+                // 그라디언트 트랙
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(gradient)
+                    .frame(height: 32)
+
+                // 썸 인디케이터
+                GeometryReader { geo in
+                    Circle()
+                        .fill(.white)
+                        .shadow(radius: 3)
+                        .frame(width: 28, height: 28)
+                        .offset(x: CGFloat(value.wrappedValue) * (geo.size.width - 28), y: 2)
+                }
+            }
+            .frame(height: 32)
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { drag in
+                        let geo = drag.location.x
+                        // 슬라이더 너비는 화면 - 양쪽 패딩 (40pt)
+                        let trackWidth = UIScreen.main.bounds.width - 40 - 28
+                        value.wrappedValue = max(0, min(1, Double(geo / trackWidth)))
+                    }
+            )
+        }
+    }
+
+    private func applyQuickColor(_ color: Color) {
+        var h: CGFloat = 0, s: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        UIColor(color).getHue(&h, saturation: &s, brightness: &b, alpha: &a)
+        hue = Double(h); saturation = Double(s); brightness = Double(b)
+    }
+
+    private let quickColors: [Color] = [
+        .black, Color(white: 0.2), Color(white: 0.5), .white,
+        Color(red: 0.9, green: 0.7, blue: 0.65),
+        Color(red: 0.85, green: 0.45, blue: 0.5),
+        Color(red: 0.75, green: 0.15, blue: 0.2),
+        Color(red: 0.55, green: 0.35, blue: 0.25),
+        Color(red: 0.35, green: 0.22, blue: 0.15),
+        Color(red: 0.65, green: 0.48, blue: 0.35),
+        Color(red: 0.95, green: 0.85, blue: 0.70),
+        Color(red: 0.55, green: 0.40, blue: 0.65),
+        Color(red: 0.25, green: 0.35, blue: 0.65),
+        Color(red: 0.15, green: 0.55, blue: 0.35),
+    ]
 }
