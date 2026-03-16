@@ -4,13 +4,16 @@ import Photos
 
 // ============================================================
 // MARK: - Face3DEditorView
-// 캡처된 3D 얼굴 모델 뷰어 + 메이크업 에디터
-// 레이아웃: 좌측 카테고리 사이드바 / 중앙 3D 뷰 / 우측 컨트롤 사이드바 / 하단 액션바
+// 레이아웃: 좌측 메이크업 툴 / 중앙 3D / 우측 브러시 타입 / 하단 컨트롤 패널
 // ============================================================
 struct Face3DEditorView: View {
     let scanData: FaceScanData
     @EnvironmentObject var router: AppRouter
     @StateObject private var viewModel: FaceEditorViewModel
+    @State private var showColorPicker = false
+    @State private var customColor: Color = .red
+
+    private let accent = Color(red: 0.93, green: 0.28, blue: 0.48)
 
     init(scanData: FaceScanData) {
         self.scanData = scanData
@@ -19,302 +22,559 @@ struct Face3DEditorView: View {
 
     var body: some View {
         ZStack {
-            // 전체 배경
-            Color(white: 0.06).ignoresSafeArea()
+            Color(white: 0.08).ignoresSafeArea()
+            FaceSceneContainer(viewModel: viewModel).ignoresSafeArea()
 
-            // 3D Scene (전체 화면)
-            FaceSceneContainer(viewModel: viewModel)
-                .ignoresSafeArea()
-
-            // Before 배지
             if viewModel.isBeforeMode {
                 VStack {
                     Text("BEFORE")
-                        .font(.caption.bold())
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 5)
+                        .font(.caption.bold()).foregroundStyle(.white)
+                        .padding(.horizontal, 14).padding(.vertical, 5)
                         .background(.black.opacity(0.65), in: Capsule())
                         .padding(.top, 70)
                     Spacer()
                 }
             }
 
-            // 캡처 플래시
             if viewModel.showCaptureFlash {
-                Color.white.ignoresSafeArea()
-                    .opacity(0.75)
-                    .allowsHitTesting(false)
-                    .transition(.opacity)
+                Color.white.ignoresSafeArea().opacity(0.75)
+                    .allowsHitTesting(false).transition(.opacity)
             }
 
-            // ── UI 오버레이 레이아웃 ──
             VStack(spacing: 0) {
-                // 상단 바
-                topBar
-                    .padding(.top, 60)
+                topBar.padding(.top, 56)
 
-                // 중간 영역: 좌측 사이드바 + 3D공간 + 우측 사이드바
-                HStack(spacing: 0) {
-                    leftCategorySidebar
+                HStack(alignment: .top, spacing: 0) {
+                    leftToolSidebar
                     Spacer()
-                    rightControlSidebar
+                    rightProductSidebar
                 }
+                .padding(.top, 6)
 
-                // 하단: 컬러 팔레트 + 액션 버튼
-                bottomBar
-                    .padding(.bottom, 34)
+                Spacer()
+                bottomPanel
             }
         }
+        .sheet(isPresented: $showColorPicker) { colorPickerSheet }
         .animation(.easeInOut(duration: 0.15), value: viewModel.showCaptureFlash)
-        .animation(.easeInOut(duration: 0.2), value: viewModel.isBeforeMode)
-        .animation(.spring(response: 0.3), value: viewModel.selectedCategory)
+        .animation(.easeInOut(duration: 0.2),  value: viewModel.isBeforeMode)
+        .animation(.spring(response: 0.28),    value: viewModel.selectedCategory)
+        .animation(.spring(response: 0.28),    value: viewModel.selectedRegion)
+        .animation(.spring(response: 0.28),    value: viewModel.interactionMode)
     }
 
-    // ──────────────────────────────────────────
-    // MARK: Top Bar
-    // ──────────────────────────────────────────
+    // ── Top Bar ──
     private var topBar: some View {
-        HStack {
-            Button { router.goTo(.inputMethod) } label: {
-                Image(systemName: "chevron.left")
-                    .font(.title3.bold())
-                    .foregroundStyle(.white)
-                    .padding(10)
-                    .background(.black.opacity(0.4), in: Circle())
-            }
+        HStack(spacing: 8) {
+            Button { router.goTo(.inputMethod) } label: { iconButton("chevron.left") }
             Spacer()
             Text("3D Makeup Editor")
-                .font(.headline)
-                .foregroundStyle(.white)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.85))
             Spacer()
-            // 카메라 리셋
-            Button { viewModel.resetCamera() } label: {
-                Image(systemName: "arrow.triangle.2.circlepath.camera")
-                    .font(.title3)
-                    .foregroundStyle(.white)
-                    .padding(10)
-                    .background(.black.opacity(0.4), in: Circle())
-            }
+            Button { viewModel.resetCamera() } label: { iconButton("arrow.triangle.2.circlepath.camera") }
+            Button { viewModel.capturePhoto()  } label: { iconButton("square.and.arrow.up") }
         }
-        .padding(.horizontal, 20)
+        .padding(.horizontal, 12)
     }
 
-    // ──────────────────────────────────────────
-    // MARK: Left Category Sidebar
-    // 5종 카테고리 세로 배치
-    // ──────────────────────────────────────────
-    private var leftCategorySidebar: some View {
-        VStack(spacing: 6) {
-            ForEach(MakeupCategory.allCases) { cat in
-                let isSelected = viewModel.selectedCategory == cat
-                Button {
-                    viewModel.selectedCategory = cat
-                } label: {
-                    VStack(spacing: 4) {
-                        Image(systemName: cat.icon)
-                            .font(.system(size: 18))
-                        Text(cat.rawValue)
-                            .font(.system(size: 8, weight: .semibold))
-                    }
-                    .foregroundStyle(isSelected ? .white : .white.opacity(0.5))
-                    .frame(width: 56, height: 56)
-                    .background(
-                        isSelected
-                            ? Color.accentColor.opacity(0.55)
-                            : Color.black.opacity(0.35),
-                        in: RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    )
+    private func iconButton(_ name: String) -> some View {
+        Image(systemName: name)
+            .font(.system(size: 13, weight: .semibold))
+            .foregroundStyle(.white.opacity(0.85))
+            .frame(width: 30, height: 30)
+            .background(Color.white.opacity(0.10), in: Circle())
+    }
+
+    // ── Left Sidebar: Face Regions ──
+    private var leftToolSidebar: some View {
+        ScrollView(.vertical, showsIndicators: false) {
+            VStack(spacing: 2) {
+                ForEach(FaceRegion.allCases) { region in
+                    regionCell(region)
                 }
             }
+            .padding(.vertical, 5)
         }
-        .padding(.leading, 10)
-        .padding(.vertical, 8)
+        .frame(width: 54)
+        .background(sidebarBG)
     }
 
-    // ──────────────────────────────────────────
-    // MARK: Right Control Sidebar
-    // 컬러 세로 팔레트 + 브러시 사이즈 + 강도 슬라이더
-    // ──────────────────────────────────────────
-    private var rightControlSidebar: some View {
-        VStack(spacing: 12) {
-            // 세로 컬러 팔레트
-            ScrollView(.vertical, showsIndicators: false) {
-                VStack(spacing: 8) {
-                    ForEach(viewModel.selectedCategory.colorPresets.indices, id: \.self) { i in
-                        let color = viewModel.selectedCategory.colorPresets[i]
-                        let selected = viewModel.isColorSelected(color)
+    private func regionCell(_ region: FaceRegion) -> some View {
+        let isSelected = viewModel.selectedRegion == region
+        return Button {
+            viewModel.selectedRegion = region
+            viewModel.selectedCategory = nil
+        } label: {
+            VStack(spacing: 3) {
+                Image(systemName: region.icon)
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(isSelected ? accent : .white.opacity(0.50))
+                    .frame(height: 18)
+                Text(region.rawValue)
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(isSelected ? accent : .white.opacity(0.38))
+                    .lineLimit(1)
+            }
+            .frame(width: 46, height: 46)
+            .background(cellBG(isSelected))
+        }
+    }
+
+    // ── Right Sidebar: Rotate + Region Products ──
+    private var rightProductSidebar: some View {
+        ScrollView(.vertical, showsIndicators: false) {
+            VStack(spacing: 2) {
+                // 회전 버튼 (맨 위)
+                rotateHandCell
+
+                // 구분선
+                Rectangle()
+                    .fill(Color.white.opacity(0.12))
+                    .frame(width: 30, height: 1)
+                    .padding(.vertical, 2)
+
+                // 선택된 부위에 해당하는 화장품
+                ForEach(viewModel.selectedRegion.products) { category in
+                    productCell(category)
+                }
+            }
+            .padding(.vertical, 5)
+        }
+        .frame(width: 54)
+        .background(sidebarBG)
+    }
+
+    private var rotateHandCell: some View {
+        let isSelected = viewModel.interactionMode == .rotate
+        return Button {
+            viewModel.interactionMode = .rotate
+            viewModel.selectedCategory = nil
+        } label: {
+            VStack(spacing: 3) {
+                RotateHandIcon(isSelected: isSelected, accent: accent)
+                    .frame(width: 22, height: 22)
+                Text("ROTATE")
+                    .font(.system(size: 6, weight: .bold))
+                    .foregroundStyle(isSelected ? accent : .white.opacity(0.38))
+                    .lineLimit(1)
+            }
+            .frame(width: 46, height: 46)
+            .background(cellBG(isSelected))
+        }
+    }
+
+    private func productCell(_ category: MakeupCategory) -> some View {
+        let isSelected = viewModel.selectedCategory == category
+        return Button {
+            viewModel.selectedCategory = category
+            viewModel.interactionMode = .paint
+        } label: {
+            VStack(spacing: 3) {
+                Image(systemName: category.icon)
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(isSelected ? accent : .white.opacity(0.50))
+                    .frame(height: 18)
+                Text(category.shortLabel)
+                    .font(.system(size: 6, weight: .bold))
+                    .foregroundStyle(isSelected ? accent : .white.opacity(0.38))
+                    .lineLimit(1).minimumScaleFactor(0.8)
+            }
+            .frame(width: 46, height: 46)
+            .background(cellBG(isSelected))
+        }
+    }
+
+    private func cellBG(_ isSelected: Bool) -> some View {
+        RoundedRectangle(cornerRadius: 10, style: .continuous)
+            .fill(isSelected ? accent.opacity(0.14) : Color.white.opacity(0.04))
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .strokeBorder(isSelected ? accent.opacity(0.55) : .clear, lineWidth: 1)
+            )
+    }
+
+    private var sidebarBG: some View {
+        RoundedRectangle(cornerRadius: 16, style: .continuous)
+            .fill(Color(white: 0.10).opacity(0.88))
+    }
+
+    // ── Bottom Panel ──
+    private var bottomPanel: some View {
+        VStack(spacing: 0) {
+            if let category = viewModel.selectedCategory {
+                // Color Palette
+                HStack(spacing: 8) {
+                    Text("Color")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.70))
+
+                    Button { showColorPicker = true } label: {
                         Circle()
-                            .fill(color)
-                            .frame(width: 30, height: 30)
-                            .overlay {
-                                if selected {
-                                    Circle().strokeBorder(.white, lineWidth: 2.5)
-                                }
+                            .fill(AngularGradient(
+                                colors: [.red, .yellow, .green, .cyan, .blue, .purple, .red],
+                                center: .center))
+                            .frame(width: 26, height: 26)
+                    }
+
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 6) {
+                            ForEach(category.colorPresets.indices, id: \.self) { i in
+                                let color = category.colorPresets[i]
+                                let sel = viewModel.isColorSelected(color)
+                                Circle().fill(color)
+                                    .frame(width: 26, height: 26)
+                                    .overlay { if sel { Circle().strokeBorder(.white, lineWidth: 2) } }
+                                    .scaleEffect(sel ? 1.10 : 1)
+                                    .animation(.spring(response: 0.2), value: sel)
+                                    .onTapGesture { viewModel.setColor(color) }
                             }
-                            .shadow(color: color.opacity(0.4), radius: selected ? 4 : 2, y: 1)
-                            .scaleEffect(selected ? 1.15 : 1.0)
-                            .animation(.spring(response: 0.25, dampingFraction: 0.7), value: selected)
-                            .onTapGesture { viewModel.setColor(color) }
+                        }
+                    }
+
+                    Button { showColorPicker = true } label: {
+                        ZStack {
+                            Circle().fill(Color.white.opacity(0.09))
+                                .overlay(Circle().strokeBorder(Color.white.opacity(0.15), lineWidth: 1))
+                                .frame(width: 26, height: 26)
+                            Image(systemName: "plus").font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(.white.opacity(0.60))
+                        }
                     }
                 }
-                .padding(.vertical, 4)
+                .padding(.horizontal, 14)
+                .padding(.top, 12)
+
+                // 슬라이더 2개
+                VStack(spacing: 6) {
+                    sliderRow(icon: "paintbrush.pointed.fill", label: "Brush Size",
+                              value: Binding(get: { viewModel.currentLayer.brushSize },
+                                             set: { viewModel.setBrushSize($0) }),
+                              display: "\(Int(viewModel.currentLayer.brushSize * 100))px")
+
+                    sliderRow(icon: "drop.fill", label: "Opacity",
+                              value: Binding(get: { viewModel.currentLayer.intensity },
+                                             set: { viewModel.setIntensity($0) }),
+                              display: "\(Int(viewModel.currentLayer.intensity * 100))%")
+                }
+                .padding(.top, 8)
+            } else {
+                // 제품 미선택 안내
+                HStack(spacing: 8) {
+                    Image(systemName: "hand.point.right")
+                        .font(.system(size: 13))
+                        .foregroundStyle(.white.opacity(0.28))
+                    Text("오른쪽에서 제품을 선택하세요")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.35))
+                }
+                .frame(height: 76)
             }
-            .frame(maxHeight: 280)
 
-            // 브러시 사이즈 표시
-            if viewModel.selectedCategory != .eraser {
-                VStack(spacing: 4) {
-                    // 브러시 크기를 원 크기로 시각화
-                    let brushVisualSize = 12 + viewModel.currentLayer.brushSize * 20
-                    Circle()
-                        .fill(.white.opacity(0.7))
-                        .frame(width: brushVisualSize, height: brushVisualSize)
-                        .frame(width: 36, height: 36)
-
-                    Text("Size")
-                        .font(.system(size: 8))
-                        .foregroundStyle(.white.opacity(0.6))
-                }
-                .onTapGesture {
-                    // 탭하면 브러시 크기 순환: 0.25 → 0.5 → 0.75 → 1.0 → 0.25
-                    let current = viewModel.currentLayer.brushSize
-                    let next: Double
-                    if current < 0.35 { next = 0.5 }
-                    else if current < 0.6 { next = 0.75 }
-                    else if current < 0.85 { next = 1.0 }
-                    else { next = 0.25 }
-                    viewModel.setBrushSize(next)
-                }
-
-                // 강도 (세로 슬라이더 대용 — % 표시 + 탭으로 조절)
-                VStack(spacing: 4) {
-                    // 커스텀 세로 강도 인디케이터
-                    ZStack(alignment: .bottom) {
-                        RoundedRectangle(cornerRadius: 3)
-                            .fill(.white.opacity(0.15))
-                            .frame(width: 6, height: 60)
-                        RoundedRectangle(cornerRadius: 3)
-                            .fill(viewModel.currentLayer.selectedColor)
-                            .frame(width: 6, height: max(4, 60 * viewModel.currentLayer.intensity))
-                    }
-                    .gesture(
-                        DragGesture(minimumDistance: 0)
-                            .onChanged { value in
-                                // 위에서 아래로: 1.0 → 0.0
-                                let barHeight: CGFloat = 60
-                                let ratio = 1.0 - min(1, max(0, value.location.y / barHeight))
-                                viewModel.setIntensity(ratio)
-                            }
-                    )
-
-                    Text("\(Int(viewModel.currentLayer.intensity * 100))%")
-                        .font(.system(size: 9, weight: .medium).monospacedDigit())
-                        .foregroundStyle(.white.opacity(0.7))
-                }
-            }
+            // 액션 바 (항상 표시)
+            actionBar
+                .padding(.top, 10)
+                .padding(.bottom, 32)
         }
-        .padding(.trailing, 10)
-        .padding(.vertical, 8)
+        .background(EditorBottomBackground())
     }
 
-    // ──────────────────────────────────────────
-    // MARK: Bottom Bar
-    // 가로 컬러 행 + 액션 버튼들
-    // ──────────────────────────────────────────
-    private var bottomBar: some View {
-        VStack(spacing: 10) {
-            // 가로 컬러 팔레트 (빠른 접근)
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 10) {
-                    ForEach(viewModel.selectedCategory.colorPresets.indices, id: \.self) { i in
-                        let color = viewModel.selectedCategory.colorPresets[i]
-                        let selected = viewModel.isColorSelected(color)
-                        Circle()
-                            .fill(color)
-                            .frame(width: 28, height: 28)
-                            .overlay {
-                                if selected {
-                                    Circle().strokeBorder(.white, lineWidth: 2)
-                                }
-                            }
-                            .scaleEffect(selected ? 1.12 : 1.0)
-                            .onTapGesture { viewModel.setColor(color) }
-                    }
+    private func sliderRow(icon: String, label: String, value: Binding<Double>, display: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: icon)
+                .font(.system(size: 11))
+                .foregroundStyle(.white.opacity(0.50))
+                .frame(width: 14)
+            Text(label)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(.white.opacity(0.72))
+                .frame(width: 62, alignment: .leading)
+            Slider(value: value, in: 0...1).tint(accent)
+            Text(display)
+                .font(.system(size: 10, weight: .medium).monospacedDigit())
+                .foregroundStyle(.white.opacity(0.50))
+                .frame(width: 34, alignment: .trailing)
+        }
+        .padding(.horizontal, 14)
+    }
+
+    private var actionBar: some View {
+        HStack(spacing: 0) {
+            Button { viewModel.reset() } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: "arrow.counterclockwise").font(.system(size: 11, weight: .semibold))
+                    Text("Reset").font(.system(size: 12, weight: .semibold))
                 }
+                .foregroundStyle(.white.opacity(0.75))
+                .frame(height: 38)
+                .padding(.horizontal, 14)
+                .background(Color.white.opacity(0.08), in: Capsule())
+            }
+
+            Spacer()
+
+            HStack(spacing: 0) {
+                beforeAfterButton(title: "Before", isActive: viewModel.isBeforeMode) {
+                    if !viewModel.isBeforeMode { viewModel.toggleBeforeAfter() }
+                }
+                beforeAfterButton(title: "After", isActive: !viewModel.isBeforeMode) {
+                    if viewModel.isBeforeMode { viewModel.toggleBeforeAfter() }
+                }
+            }
+            .padding(2)
+            .background(Color.white.opacity(0.09), in: Capsule())
+
+            Spacer()
+
+            Button { viewModel.capturePhoto() } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: "checkmark").font(.system(size: 11, weight: .bold))
+                    Text("Apply").font(.system(size: 13, weight: .bold))
+                }
+                .foregroundStyle(.white)
+                .frame(height: 38)
                 .padding(.horizontal, 16)
+                .background(accent, in: Capsule())
             }
-
-            // 액션 버튼 행
-            HStack(spacing: 16) {
-                // Reset
-                Button { viewModel.reset() } label: {
-                    VStack(spacing: 3) {
-                        Image(systemName: "arrow.counterclockwise")
-                            .font(.system(size: 16))
-                        Text("Reset")
-                            .font(.system(size: 9, weight: .medium))
-                    }
-                    .foregroundStyle(.white.opacity(0.8))
-                    .frame(width: 54, height: 44)
-                }
-
-                // Before / After
-                Button { viewModel.toggleBeforeAfter() } label: {
-                    VStack(spacing: 3) {
-                        Image(systemName: viewModel.isBeforeMode ? "eye.fill" : "eye.slash.fill")
-                            .font(.system(size: 16))
-                        Text(viewModel.isBeforeMode ? "After" : "Before")
-                            .font(.system(size: 9, weight: .medium))
-                    }
-                    .foregroundStyle(viewModel.isBeforeMode ? Color.accentColor : .white.opacity(0.8))
-                    .frame(width: 54, height: 44)
-                }
-
-                // 강도 슬라이더 (가로)
-                HStack(spacing: 6) {
-                    Image(systemName: "circle")
-                        .font(.system(size: 7))
-                        .foregroundStyle(.white.opacity(0.4))
-                    Slider(
-                        value: Binding(
-                            get: { viewModel.currentLayer.intensity },
-                            set: { viewModel.setIntensity($0) }
-                        ),
-                        in: 0.0...1.0
-                    )
-                    .tint(viewModel.currentLayer.selectedColor)
-                    Image(systemName: "circle.fill")
-                        .font(.system(size: 7))
-                        .foregroundStyle(.white.opacity(0.4))
-                }
-                .frame(maxWidth: .infinity)
-
-                // 레이어 On/Off
-                Toggle("", isOn: Binding(
-                    get: { viewModel.currentLayer.isEnabled },
-                    set: { viewModel.setEnabled($0) }
-                ))
-                .labelsHidden()
-                .scaleEffect(0.75)
-
-                // 캡처
-                Button { viewModel.capturePhoto() } label: {
-                    Image(systemName: "camera.fill")
-                        .font(.system(size: 18))
-                        .foregroundStyle(.white)
-                        .frame(width: 44, height: 44)
-                        .background(Color.accentColor, in: Circle())
-                }
-            }
-            .padding(.horizontal, 16)
         }
-        .padding(.vertical, 10)
-        .background(
-            .ultraThinMaterial,
-            in: RoundedRectangle(cornerRadius: 20, style: .continuous)
-        )
-        .padding(.horizontal, 8)
+        .padding(.horizontal, 14)
+    }
+
+    private func beforeAfterButton(title: String, isActive: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(isActive ? Color(white: 0.10) : .white.opacity(0.45))
+                .frame(width: 56, height: 30)
+                .background(isActive ? .white : .clear, in: Capsule())
+        }
+    }
+
+    // 커스텀 색상 피커 시트
+    private var colorPickerSheet: some View {
+        NavigationStack {
+            VStack(spacing: 24) {
+                ColorPicker("", selection: $customColor, supportsOpacity: false)
+                    .labelsHidden()
+                    .frame(width: 280, height: 280)
+                Button("적용하기") {
+                    viewModel.setColor(customColor)
+                    showColorPicker = false
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(accent)
+            }
+            .padding()
+            .navigationTitle("커스텀 색상")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("취소") { showColorPicker = false }
+                }
+            }
+        }
+        .presentationDetents([.medium])
+    }
+}
+
+// ============================================================
+// MARK: - RotateHandIcon
+// Canvas로 그린 회전 아이콘 (오빗 모드 버튼용)
+// ============================================================
+private struct RotateHandIcon: View {
+    let isSelected: Bool
+    let accent: Color
+
+    private var col: Color { isSelected ? accent : Color(white: 0.60) }
+
+    var body: some View {
+        Canvas { ctx, size in
+            let w = size.width, h = size.height
+            let cx = w * 0.5, cy = h * 0.5
+            let r = w * 0.36
+
+            // 원형 화살표 호 (약 300°)
+            var arc = Path()
+            arc.addArc(center: CGPoint(x: cx, y: cy), radius: r,
+                       startAngle: .degrees(130), endAngle: .degrees(50), clockwise: false)
+            ctx.stroke(arc, with: .color(col), style: StrokeStyle(lineWidth: 2.2, lineCap: .round))
+
+            // 화살표 머리 (호 끝 부분)
+            let headAngle: CGFloat = 50 * .pi / 180
+            let hx = cx + r * cos(headAngle)
+            let hy = cy + r * sin(headAngle)
+            var head = Path()
+            head.move(to: CGPoint(x: hx - 4, y: hy - 3))
+            head.addLine(to: CGPoint(x: hx + 2, y: hy + 1))
+            head.addLine(to: CGPoint(x: hx - 1, y: hy + 4))
+            ctx.fill(head, with: .color(col))
+        }
+    }
+}
+
+// ============================================================
+// MARK: - BrushToolIcon
+// Canvas로 직접 그린 메이크업 브러시 일러스트 아이콘
+// 참조: 둥근 파우더 / 포인트 세부 / 팬 / 뷰티블렌더 / 플랫앵글 / 퍼프
+// ============================================================
+private struct BrushToolIcon: View {
+    let type: BrushType
+    let isSelected: Bool
+    let accent: Color
+
+    /// 선택 여부에 따라 모(毛) 색상 결정
+    private var bristle: Color {
+        isSelected ? accent : Color(red: 0.88, green: 0.80, blue: 0.70)
+    }
+    private let gold   = Color(red: 0.80, green: 0.68, blue: 0.36)
+    private let dark   = Color(white: 0.16)
+
+    var body: some View {
+        Canvas { ctx, size in
+            let w = size.width, h = size.height
+
+            // 공용 헬퍼: 둥근 사각형 Path
+            func rr(_ x: CGFloat, _ y: CGFloat,
+                    _ bw: CGFloat, _ bh: CGFloat, _ r: CGFloat) -> Path {
+                Path(roundedRect: CGRect(x: x, y: y, width: bw, height: bh),
+                     cornerRadius: r)
+            }
+
+            switch type {
+
+            // ── Round powder brush ──
+            // 둥근 돔 헤드 + 금 페룰 + 검정 핸들
+            case .brush:
+                // 브리슬 도움(dome)
+                ctx.fill(
+                    Path(ellipseIn: CGRect(x: w*0.05, y: 0, width: w*0.90, height: h*0.44)),
+                    with: .color(bristle)
+                )
+                // 광택 하이라이트
+                ctx.fill(
+                    Path(ellipseIn: CGRect(x: w*0.18, y: h*0.03, width: w*0.28, height: h*0.11)),
+                    with: .color(.white.opacity(0.28))
+                )
+                // 페룰 (금)
+                ctx.fill(rr(w*0.29, h*0.42, w*0.42, h*0.08, 2), with: .color(gold))
+                // 핸들
+                ctx.fill(rr(w*0.36, h*0.49, w*0.28, h*0.51, 3), with: .color(dark))
+
+            // ── Detail pencil brush ──
+            // 얇은 포인트 팁 + 핸들
+            case .pencil:
+                var tip = Path()
+                tip.move(to: CGPoint(x: w*0.50, y: 0))
+                tip.addCurve(to: CGPoint(x: w*0.50, y: h*0.20),
+                             control1: CGPoint(x: w*0.26, y: h*0.08),
+                             control2: CGPoint(x: w*0.26, y: h*0.18))
+                tip.addCurve(to: CGPoint(x: w*0.50, y: 0),
+                             control1: CGPoint(x: w*0.74, y: h*0.18),
+                             control2: CGPoint(x: w*0.74, y: h*0.08))
+                ctx.fill(tip, with: .color(bristle))
+                ctx.fill(rr(w*0.32, h*0.18, w*0.36, h*0.08, 2), with: .color(gold))
+                ctx.fill(rr(w*0.36, h*0.25, w*0.28, h*0.75, 3), with: .color(dark))
+
+            // ── Fan brush ──
+            // 부채꼴로 펼쳐진 브리슬
+            case .airbrush:
+                var fan = Path()
+                fan.move(to: CGPoint(x: w*0.50, y: h*0.38))
+                fan.addLine(to: CGPoint(x: 0, y: 0))
+                fan.addQuadCurve(to: CGPoint(x: w, y: 0),
+                                 control: CGPoint(x: w*0.50, y: h*0.14))
+                fan.closeSubpath()
+                ctx.fill(fan, with: .color(bristle.opacity(0.90)))
+                // 브리슬 결(세선)
+                for i in 1..<6 {
+                    let t = CGFloat(i) / 6.0
+                    var line = Path()
+                    line.move(to: CGPoint(x: w*0.50, y: h*0.38))
+                    line.addLine(to: CGPoint(x: w*t, y: 0))
+                    ctx.stroke(line, with: .color(.white.opacity(0.12)), lineWidth: 0.5)
+                }
+                ctx.fill(rr(w*0.29, h*0.36, w*0.42, h*0.08, 2), with: .color(gold))
+                ctx.fill(rr(w*0.36, h*0.43, w*0.28, h*0.57, 3), with: .color(dark))
+
+            // ── Beauty blender sponge ──
+            // 달걀형 스폰지, 핸들 없음
+            case .sponge:
+                // 달걀 실루엣 (아래가 더 둥글게)
+                var egg = Path()
+                egg.addEllipse(in: CGRect(x: w*0.08, y: h*0.04, width: w*0.84, height: h*0.92))
+                ctx.fill(egg, with: .color(bristle.opacity(0.90)))
+                // 상단 광택
+                ctx.fill(
+                    Path(ellipseIn: CGRect(x: w*0.26, y: h*0.10, width: w*0.28, height: h*0.14)),
+                    with: .color(.white.opacity(0.32))
+                )
+                // 중간 솔기선
+                var seam = Path()
+                seam.addEllipse(in: CGRect(x: w*0.14, y: h*0.46, width: w*0.72, height: h*0.10))
+                ctx.stroke(seam, with: .color(.white.opacity(0.20)), lineWidth: 0.8)
+
+            // ── Flat angled brush ──
+            // 각진 플랫 헤드 (아이섀도/쉐딩 용)
+            case .smudge:
+                var head = Path()
+                head.move(to: CGPoint(x: w*0.06, y: h*0.14))
+                head.addLine(to: CGPoint(x: w*0.94, y: h*0.04))
+                head.addLine(to: CGPoint(x: w*0.94, y: h*0.34))
+                head.addLine(to: CGPoint(x: w*0.06, y: h*0.34))
+                head.closeSubpath()
+                ctx.fill(head, with: .color(bristle))
+                // 브리슬 결
+                for i in 1..<5 {
+                    let x = w * (0.20 + CGFloat(i) * 0.15)
+                    var line = Path()
+                    line.move(to: CGPoint(x: x, y: h*0.06))
+                    line.addLine(to: CGPoint(x: x, y: h*0.32))
+                    ctx.stroke(line, with: .color(.white.opacity(0.12)), lineWidth: 0.5)
+                }
+                ctx.fill(rr(w*0.29, h*0.33, w*0.42, h*0.08, 2), with: .color(gold))
+                ctx.fill(rr(w*0.36, h*0.40, w*0.28, h*0.60, 3), with: .color(dark))
+
+            // ── Powder puff ──
+            // 둥근 퍼프 + 리본 장식
+            case .layer:
+                ctx.fill(
+                    Path(ellipseIn: CGRect(x: 0, y: 0, width: w, height: h*0.86)),
+                    with: .color(bristle.opacity(0.88))
+                )
+                ctx.fill(
+                    Path(ellipseIn: CGRect(x: w*0.20, y: h*0.08, width: w*0.30, height: h*0.14)),
+                    with: .color(.white.opacity(0.26))
+                )
+                // 리본 왼쪽
+                ctx.fill(
+                    Path(ellipseIn: CGRect(x: w*0.15, y: h*0.36, width: w*0.30, height: h*0.14)),
+                    with: .color(.white.opacity(0.40))
+                )
+                // 리본 오른쪽
+                ctx.fill(
+                    Path(ellipseIn: CGRect(x: w*0.55, y: h*0.36, width: w*0.30, height: h*0.14)),
+                    with: .color(.white.opacity(0.40))
+                )
+                // 리본 중앙 매듭
+                ctx.fill(
+                    Path(ellipseIn: CGRect(x: w*0.42, y: h*0.39, width: w*0.16, height: h*0.08)),
+                    with: .color(.white.opacity(0.65))
+                )
+            }
+        }
+        .frame(width: 30, height: 40)
+    }
+}
+
+// ── 하단 패널 배경 (상단 모서리만 라운드) ──
+private struct EditorBottomBackground: View {
+    var body: some View {
+        Color(white: 0.10)
+            .clipShape(UnevenRoundedRectangle(
+                topLeadingRadius: 28, bottomLeadingRadius: 0,
+                bottomTrailingRadius: 0, topTrailingRadius: 28,
+                style: .continuous
+            ))
     }
 }
 
@@ -678,6 +938,15 @@ struct FaceSceneContainer: UIViewRepresentable {
 
         @MainActor
         @objc func handlePan(_ gesture: UIPanGestureRecognizer) {
+            if viewModel.interactionMode == .rotate {
+                handleOrbit(gesture)
+            } else {
+                handlePaint(gesture)
+            }
+        }
+
+        @MainActor
+        private func handleOrbit(_ gesture: UIPanGestureRecognizer) {
             guard let cameraNode = viewModel.cameraNode else { return }
             let translation = gesture.translation(in: gesture.view)
 
@@ -688,16 +957,30 @@ struct FaceSceneContainer: UIViewRepresentable {
                 let dx = Float(translation.x - lastPanPoint.x) * 0.005
                 lastPanPoint = translation
 
-                // Y축(좌우) 회전만 허용 — 상하(X축) 회전 없음
-                // 메이크업 앱 특성상 뒷면이 보이지 않도록 ±65° 로 제한
+                // Y축(좌우) 회전만 허용 — ±65° 제한
                 let maxAngle: Float = 65 * .pi / 180
                 viewModel.orbitAngleY = max(-maxAngle, min(maxAngle, viewModel.orbitAngleY + dx))
-                viewModel.orbitAngleX = 0   // 항상 수평 고정
+                viewModel.orbitAngleX = 0
 
                 updateCameraOrbit(cameraNode)
             default:
                 break
             }
+        }
+
+        @MainActor
+        private func handlePaint(_ gesture: UIPanGestureRecognizer) {
+            guard gesture.state == .began || gesture.state == .changed else { return }
+            guard let scnView = viewModel.scnView else { return }
+            let location = gesture.location(in: scnView)
+            let hits = scnView.hitTest(location, options: [
+                SCNHitTestOption.searchMode: SCNHitTestSearchMode.closest.rawValue,
+                SCNHitTestOption.backFaceCulling: true
+            ])
+            guard let hit = hits.first(where: { $0.node === viewModel.faceNode }) else { return }
+            let uv = hit.textureCoordinates(withMappingChannel: 0)
+            // Y축 반전: SceneKit UV는 Y=0이 하단, UIKit 렌더링은 Y=0이 상단
+            viewModel.paintAtUV(uv: CGPoint(x: CGFloat(uv.x), y: 1.0 - CGFloat(uv.y)))
         }
 
         @MainActor
@@ -748,7 +1031,10 @@ class FaceEditorViewModel: ObservableObject {
     let scanData: FaceScanData
 
     // MARK: Published State
-    @Published var selectedCategory: MakeupCategory = .lip
+    @Published var selectedCategory: MakeupCategory? = nil
+    @Published var selectedRegion: FaceRegion = .full
+    @Published var interactionMode: InteractionMode = .rotate
+    @Published var selectedBrushType: BrushType = .brush
     @Published var layers: [MakeupCategory: MakeupLayerState] = {
         Dictionary(uniqueKeysWithValues: MakeupCategory.allCases.map {
             ($0, MakeupLayerState(category: $0))
@@ -756,6 +1042,9 @@ class FaceEditorViewModel: ObservableObject {
     }()
     @Published var isBeforeMode = false
     @Published var showCaptureFlash = false
+
+    // MARK: Paint Canvas
+    private var paintCanvasImage: UIImage? = nil
 
     // MARK: Scene References
     weak var faceNode: SCNNode?
@@ -776,32 +1065,37 @@ class FaceEditorViewModel: ObservableObject {
 
     // MARK: Computed
     var currentLayer: MakeupLayerState {
-        layers[selectedCategory] ?? MakeupLayerState(category: selectedCategory)
+        guard let cat = selectedCategory else { return MakeupLayerState(category: .lip) }
+        return layers[cat] ?? MakeupLayerState(category: cat)
     }
 
     func isColorSelected(_ color: Color) -> Bool {
-        guard let stored = layers[selectedCategory] else { return false }
+        guard let cat = selectedCategory, let stored = layers[cat] else { return false }
         return UIColor(stored.selectedColor).isApproximatelyEqual(to: UIColor(color))
     }
 
     // MARK: Actions
     func setColor(_ color: Color) {
-        layers[selectedCategory]?.selectedColor = color
+        guard let cat = selectedCategory else { return }
+        layers[cat]?.selectedColor = color
         applyMakeupTexture()
     }
 
     func setIntensity(_ intensity: Double) {
-        layers[selectedCategory]?.intensity = intensity
+        guard let cat = selectedCategory else { return }
+        layers[cat]?.intensity = intensity
         applyMakeupTexture()
     }
 
     func setBrushSize(_ size: Double) {
-        layers[selectedCategory]?.brushSize = size
+        guard let cat = selectedCategory else { return }
+        layers[cat]?.brushSize = size
         applyMakeupTexture()
     }
 
     func setEnabled(_ enabled: Bool) {
-        layers[selectedCategory]?.isEnabled = enabled
+        guard let cat = selectedCategory else { return }
+        layers[cat]?.isEnabled = enabled
         applyMakeupTexture()
     }
 
@@ -814,6 +1108,31 @@ class FaceEditorViewModel: ObservableObject {
         for cat in MakeupCategory.allCases {
             layers[cat] = MakeupLayerState(category: cat)
         }
+        paintCanvasImage = nil
+        applyMakeupTexture()
+    }
+
+    func paintAtUV(uv: CGPoint) {
+        guard let category = selectedCategory else { return }
+        let state = layers[category] ?? MakeupLayerState(category: category)
+        let brushPx = CGFloat(state.brushSize * 60 + 8)
+        let pixelX = uv.x * 1024
+        let pixelY = uv.y * 1024
+
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1; format.opaque = false
+        let result = UIGraphicsImageRenderer(size: CGSize(width: 1024, height: 1024), format: format).image { ctx in
+            paintCanvasImage?.draw(at: .zero)
+            let rect = CGRect(x: pixelX - brushPx, y: pixelY - brushPx,
+                              width: brushPx * 2, height: brushPx * 2)
+            MakeupTextureRenderer.drawSoftMakeup(
+                ctx: ctx.cgContext, rect: rect,
+                color: UIColor(state.selectedColor),
+                intensity: CGFloat(state.intensity),
+                category: category
+            )
+        }
+        paintCanvasImage = result
         applyMakeupTexture()
     }
 
@@ -846,18 +1165,17 @@ class FaceEditorViewModel: ObservableObject {
         }
 
         let makeupOverlay = MakeupTextureRenderer.render(layers: Array(layers.values))
-        let composited = compositeTexture(base: scanData.faceTexture, overlay: makeupOverlay)
+        let result = compositeAll(base: scanData.faceTexture, makeup: makeupOverlay, paint: paintCanvasImage)
 
         faceNode.geometry?.firstMaterial?.diffuse.contents =
-            composited ?? scanData.faceTexture ?? skinFallback
+            result ?? scanData.faceTexture ?? skinFallback
     }
 
-    private func compositeTexture(base: UIImage?, overlay: UIImage?) -> UIImage? {
-        guard overlay != nil else { return base }
+    private func compositeAll(base: UIImage?, makeup: UIImage?, paint: UIImage?) -> UIImage? {
+        guard makeup != nil || paint != nil else { return base }
         let size = CGSize(width: 1024, height: 1024)
         let format = UIGraphicsImageRendererFormat()
-        format.scale = 1
-        format.opaque = true
+        format.scale = 1; format.opaque = true
 
         return UIGraphicsImageRenderer(size: size, format: format).image { _ in
             if let base = base {
@@ -866,7 +1184,8 @@ class FaceEditorViewModel: ObservableObject {
                 UIColor(red: 0.87, green: 0.75, blue: 0.65, alpha: 1).setFill()
                 UIBezierPath(rect: CGRect(origin: .zero, size: size)).fill()
             }
-            overlay?.draw(in: CGRect(origin: .zero, size: size))
+            makeup?.draw(in: CGRect(origin: .zero, size: size))
+            paint?.draw(in: CGRect(origin: .zero, size: size))
         }
     }
 
