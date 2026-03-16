@@ -242,6 +242,32 @@ enum MakeupTool: String, CaseIterable, Identifiable {
         }
     }
 
+    // 툴별 디폴트 강도 — 펜슬/라이너는 얇고 정밀하게 시작
+    var defaultIntensity: Double {
+        switch self {
+        case .eyeliner, .browPencil, .lipPencil, .detail: return 0.15
+        case .contour, .browGel, .smudge:                 return 0.18
+        case .eyeshadow, .browBrush, .browPowder:         return 0.20
+        case .lipBrush, .gloss:                           return 0.22
+        case .blusher, .highlight:                        return 0.18
+        case .foundation, .foundationBrush:               return 0.20
+        case .airbrush, .blend, .blendBrush, .smooth:     return 0.15
+        }
+    }
+
+    // 툴별 디폴트 브러쉬 크기 — 펜슬은 최소, 브러쉬는 중간
+    var defaultBrushSize: Double {
+        switch self {
+        case .eyeliner, .browPencil, .lipPencil, .detail: return 0.08
+        case .browGel, .browBrush, .smudge:               return 0.12
+        case .eyeshadow, .browPowder, .lipBrush:          return 0.15
+        case .contour, .highlight, .blusher:              return 0.18
+        case .gloss:                                      return 0.14
+        case .foundation, .foundationBrush:               return 0.20
+        case .airbrush, .blend, .blendBrush, .smooth:     return 0.18
+        }
+    }
+
     var colorPresets: [Color] {
         switch self {
         case .foundationBrush, .foundation, .smooth, .airbrush:
@@ -341,8 +367,8 @@ struct ToolLayerState {
     init(tool: MakeupTool) {
         self.tool = tool
         self.selectedColor = tool.colorPresets[0]
-        self.intensity = 0.5
-        self.brushSize = 0.3
+        self.intensity = tool.defaultIntensity
+        self.brushSize = tool.defaultBrushSize
     }
 }
 

@@ -79,29 +79,46 @@ struct FaceCaptureView: View {
     private var bottomUI: some View {
         VStack(spacing: 14) {
             // 방향 안내 + 화살표
-            if captureVM.isFaceDetected && captureVM.scanProgress < 1.0 {
-                HStack(spacing: 16) {
-                    Image(systemName: "arrow.left")
-                        .font(.title2.bold())
-                        .foregroundStyle(captureVM.leftProgress >= 1.0 ? Color.green : .white)
-                        .opacity(captureVM.leftProgress >= 1.0 ? 0.5 : (arrowPulse ? 1.0 : 0.4))
-
-                    VStack(spacing: 4) {
-                        Text("얼굴을 좌우로")
-                        Text("천천히 돌려주세요")
+            if captureVM.isFaceDetected && !captureVM.isCapturing {
+                if captureVM.waitingForFront {
+                    // 양쪽 완료 → 정면 복귀 안내
+                    HStack(spacing: 10) {
+                        Image(systemName: "arrow.up.circle.fill")
+                            .font(.title2.bold())
+                            .foregroundStyle(Color.green)
+                            .opacity(arrowPulse ? 1.0 : 0.5)
+                        Text("정면을 바라봐주세요")
+                            .font(.subheadline.bold())
+                            .foregroundStyle(.white)
                     }
-                    .font(.subheadline.bold())
-                    .foregroundStyle(.white)
-                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 24)
+                    .padding(.vertical, 12)
+                    .background(.black.opacity(0.5), in: RoundedRectangle(cornerRadius: 14))
+                } else if captureVM.scanProgress < 1.0 {
+                    // 좌/우 방향 안내
+                    HStack(spacing: 16) {
+                        Image(systemName: "arrow.left")
+                            .font(.title2.bold())
+                            .foregroundStyle(captureVM.leftProgress >= 1.0 ? Color.green : .white)
+                            .opacity(captureVM.leftProgress >= 1.0 ? 0.5 : (arrowPulse ? 1.0 : 0.4))
 
-                    Image(systemName: "arrow.right")
-                        .font(.title2.bold())
-                        .foregroundStyle(captureVM.rightProgress >= 1.0 ? Color.green : .white)
-                        .opacity(captureVM.rightProgress >= 1.0 ? 0.5 : (arrowPulse ? 1.0 : 0.4))
+                        VStack(spacing: 4) {
+                            Text("고개를 좌우로")
+                            Text("한 번씩 돌려주세요")
+                        }
+                        .font(.subheadline.bold())
+                        .foregroundStyle(.white)
+                        .multilineTextAlignment(.center)
+
+                        Image(systemName: "arrow.right")
+                            .font(.title2.bold())
+                            .foregroundStyle(captureVM.rightProgress >= 1.0 ? Color.green : .white)
+                            .opacity(captureVM.rightProgress >= 1.0 ? 0.5 : (arrowPulse ? 1.0 : 0.4))
+                    }
+                    .padding(.horizontal, 24)
+                    .padding(.vertical, 12)
+                    .background(.black.opacity(0.5), in: RoundedRectangle(cornerRadius: 14))
                 }
-                .padding(.horizontal, 24)
-                .padding(.vertical, 12)
-                .background(.black.opacity(0.5), in: RoundedRectangle(cornerRadius: 14))
             }
 
             // 진행률
@@ -229,69 +246,48 @@ class FaceCaptureViewModel: ObservableObject {
     nonisolated(unsafe) var latestFaceAnchor: ARFaceAnchor?
     weak var sceneView: ARSCNView?
 
-    // ── 체류 시간 기반 스캔 ──────────────────────────────
-    // 각 방향에서 일정 시간 이상 머물러야 진행됨
-    private let yawThreshold: Float     = 0.18   // 이 각도 이상 돌아야 카운트
-    private let requiredDwell: Double   = 1.2    // 각 방향당 필요 체류 시간(초)
-    private let minTotalTime: Double    = 3.0    // 최소 총 스캔 시간(초)
-    private let captureDelay: Double    = 0.8    // 100% 후 캡처까지 대기(초)
+    // ── 단순 방향 감지 스캔 ─────────────────────────────
+    // 좌/우 각 방향을 한 번씩 통과 → 정면 복귀 시 캡처
+    // (정면에서 캡처해야 양쪽 텍스처가 균일하게 베이킹됨)
+    private let yawThreshold: Float  = 0.20   // 좌/우 감지 각도
+    private let frontThreshold: Float = 0.10  // 정면으로 간주하는 yaw 범위
 
-    private var leftDwell:  Double = 0   // yaw > threshold 누적 시간
-    private var rightDwell: Double = 0   // yaw < -threshold 누적 시간
-    private var totalElapsed: Double = 0
-    private var lastTimestamp: Date? = nil
+    private var hasSeenLeft  = false   // 왼쪽 방향 통과 여부
+    private var hasSeenRight = false   // 오른쪽 방향 통과 여부
+    @Published var waitingForFront = false  // 양쪽 완료 후 정면 대기 상태
     private var hasAutoCaptured = false
-    private var isCountingDown = false
 
     var statusMessage: String {
-        if isCapturing    { return "스캔 완료! 처리 중..." }
-        if isCountingDown { return "완료! 잠시 기다려주세요..." }
-        if !isFaceDetected { return "얼굴을 가이드 안에 맞춰주세요" }
-        if scanProgress >= 1.0 { return "완료! 잠시 기다려주세요..." }
-        if leftProgress >= 1.0  { return "이제 반대쪽으로 돌려주세요 →" }
-        if rightProgress >= 1.0 { return "← 반대쪽으로 돌려주세요" }
-        return "좌우로 천천히 고개를 돌려주세요"
+        if isCapturing      { return "스캔 완료! 처리 중..." }
+        if waitingForFront  { return "정면을 바라봐주세요" }
+        if !isFaceDetected  { return "얼굴을 가이드 안에 맞춰주세요" }
+        if !hasSeenLeft     { return "← 왼쪽으로 고개를 돌려주세요" }
+        if !hasSeenRight    { return "오른쪽으로 고개를 돌려주세요 →" }
+        return "정면을 바라봐주세요"
     }
 
-    /// 매 프레임 ARFaceAnchor에서 yaw 추출 + 체류 시간 누적
+    /// 매 프레임 ARFaceAnchor에서 yaw 추출 → 좌/우 통과 감지 → 정면 복귀 시 캡처
     func updateScan(from anchor: ARFaceAnchor) {
-        guard !hasAutoCaptured, !isCountingDown else { return }
+        guard !hasAutoCaptured else { return }
 
-        let now = Date()
-        let dt = lastTimestamp.map { now.timeIntervalSince($0) } ?? (1.0 / 30.0)
-        lastTimestamp = now
-
-        // 너무 큰 dt는 포즈 손실로 간주 (최대 0.1초)
-        let clampedDt = min(dt, 0.1)
-        totalElapsed += clampedDt
-
-        // columns.2.x: 얼굴 정면 벡터의 x성분 → 좌우 회전량
         let yaw = anchor.transform.columns.2.x
 
-        if yaw > yawThreshold {
-            leftDwell  += clampedDt
-        } else if yaw < -yawThreshold {
-            rightDwell += clampedDt
-        }
+        if !waitingForFront {
+            if yaw > yawThreshold  { hasSeenLeft  = true }
+            if yaw < -yawThreshold { hasSeenRight = true }
 
-        let lp = min(leftDwell  / requiredDwell, 1.0)
-        let rp = min(rightDwell / requiredDwell, 1.0)
+            leftProgress  = hasSeenLeft  ? 1.0 : 0.0
+            rightProgress = hasSeenRight ? 1.0 : 0.0
+            scanProgress  = (hasSeenLeft ? 0.5 : 0.0) + (hasSeenRight ? 0.5 : 0.0)
 
-        // 전체 진행률: 좌우 체류 + 최소 총 시간 모두 충족해야 100%
-        let timeFactor = min(totalElapsed / minTotalTime, 1.0)
-        let coverFactor = (lp + rp) / 2.0
-        let combinedProgress = min(timeFactor, coverFactor)
-
-        leftProgress  = lp
-        rightProgress = rp
-        scanProgress  = combinedProgress
-
-        if lp >= 1.0 && rp >= 1.0 && totalElapsed >= minTotalTime {
-            isCountingDown = true
-            hasAutoCaptured = true
-            // 1.5초 후 정면을 바라볼 때 캡처
-            DispatchQueue.main.asyncAfter(deadline: .now() + captureDelay) {
-                self.capture()
+            if hasSeenLeft && hasSeenRight {
+                waitingForFront = true
+            }
+        } else {
+            // 정면 복귀 감지 → 즉시 캡처
+            if abs(yaw) < frontThreshold {
+                hasAutoCaptured = true
+                capture()
             }
         }
     }

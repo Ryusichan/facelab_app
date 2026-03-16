@@ -105,6 +105,7 @@ struct Face3DEditorView: View {
         return Button {
             viewModel.selectedRegion = region
             viewModel.selectedTool = nil
+            viewModel.focusOnRegion(region)
         } label: {
             VStack(spacing: 3) {
                 Image(systemName: region.icon)
@@ -932,6 +933,7 @@ struct FaceSceneContainer: UIViewRepresentable {
         let viewModel: FaceEditorViewModel
         private var lastPanPoint: CGPoint = .zero
         private var lastPinchScale: CGFloat = 1
+        private var lastPaintUV: CGPoint? = nil
 
         init(viewModel: FaceEditorViewModel) {
             self.viewModel = viewModel
@@ -971,7 +973,12 @@ struct FaceSceneContainer: UIViewRepresentable {
 
         @MainActor
         private func handlePaint(_ gesture: UIPanGestureRecognizer) {
-            guard gesture.state == .began || gesture.state == .changed else { return }
+            guard gesture.state == .began || gesture.state == .changed else {
+                if gesture.state == .ended || gesture.state == .cancelled {
+                    lastPaintUV = nil
+                }
+                return
+            }
             guard let scnView = viewModel.scnView else { return }
             let location = gesture.location(in: scnView)
             let hits = scnView.hitTest(location, options: [
@@ -979,8 +986,36 @@ struct FaceSceneContainer: UIViewRepresentable {
                 SCNHitTestOption.backFaceCulling: true
             ])
             guard let hit = hits.first(where: { $0.node === viewModel.faceNode }) else { return }
-            let uv = hit.textureCoordinates(withMappingChannel: 0)
-            viewModel.paintAtUV(uv: CGPoint(x: CGFloat(uv.x), y: CGFloat(uv.y)))
+            let rawUV = hit.textureCoordinates(withMappingChannel: 0)
+            let currentUV = CGPoint(x: CGFloat(rawUV.x), y: CGFloat(rawUV.y))
+
+            if gesture.state == .began || lastPaintUV == nil {
+                // 첫 터치: 단일 점
+                viewModel.paintAtUVs([currentUV])
+            } else if let prev = lastPaintUV {
+                // 이전 UV → 현재 UV 보간: 브러쉬 지름의 35% 간격으로 채움
+                let dx = currentUV.x - prev.x
+                let dy = currentUV.y - prev.y
+                let dist = sqrt(dx * dx + dy * dy)
+
+                let brushPx = CGFloat(viewModel.currentToolState.brushSize * 20 + 3)
+                let stepSize = max((brushPx * 0.35) / 1024.0, 0.001)
+
+                if dist > stepSize {
+                    let steps = Int(ceil(dist / stepSize))
+                    var uvs: [CGPoint] = []
+                    uvs.reserveCapacity(steps)
+                    for i in 1...steps {
+                        let t = CGFloat(i) / CGFloat(steps)
+                        uvs.append(CGPoint(x: prev.x + dx * t, y: prev.y + dy * t))
+                    }
+                    viewModel.paintAtUVs(uvs)
+                } else {
+                    viewModel.paintAtUVs([currentUV])
+                }
+            }
+
+            lastPaintUV = currentUV
         }
 
         @MainActor
@@ -1101,10 +1136,14 @@ class FaceEditorViewModel: ObservableObject {
         applyMakeupTexture()
     }
 
-    func paintAtUV(uv: CGPoint) {
+    // 단일 UV 점 페인트 (applyTexture=false 시 캔버스만 업데이트)
+    func paintAtUV(uv: CGPoint, applyTexture: Bool = true) {
         guard let tool = selectedTool else { return }
         let state = toolStates[tool] ?? ToolLayerState(tool: tool)
-        let brushPx = CGFloat(state.brushSize * 60 + 8)
+        // 브러쉬 크기: 슬라이더 0~1 → 3~23px (기존 8~68px 대비 절반 이하)
+        let brushPx = CGFloat(state.brushSize * 20 + 3)
+        // intensity 상한: 0.45 (슬라이더 MAX=1이어도 45% 강도 이상 넘지 않음)
+        let clampedIntensity = CGFloat(state.intensity) * 0.45
         let pixelX = uv.x * 1024
         let pixelY = uv.y * 1024
 
@@ -1117,13 +1156,21 @@ class FaceEditorViewModel: ObservableObject {
             MakeupTextureRenderer.drawBrushStroke(
                 ctx: ctx.cgContext, rect: rect,
                 color: UIColor(state.selectedColor),
-                intensity: CGFloat(state.intensity),
+                intensity: clampedIntensity,
                 maxAlpha: tool.maxAlpha,
                 isHardEdge: tool.isHardEdge
             )
         }
         paintCanvasImage = result
-        applyMakeupTexture()
+        if applyTexture { applyMakeupTexture() }
+    }
+
+    // 보간된 UV 배열을 한 번에 그리고 텍스처는 마지막에 1회 적용
+    func paintAtUVs(_ uvs: [CGPoint]) {
+        guard !uvs.isEmpty else { return }
+        for (i, uv) in uvs.enumerated() {
+            paintAtUV(uv: uv, applyTexture: i == uvs.count - 1)
+        }
     }
 
     func resetCamera() {
@@ -1132,12 +1179,57 @@ class FaceEditorViewModel: ObservableObject {
         orbitAngleX = 0
         orbitAngleY = 0
         orbitDistance = scanData.meshRadius * 5.0
+        orbitTarget = SCNVector3(
+            scanData.meshCenter.x, scanData.meshCenter.y, scanData.meshCenter.z)
 
         SCNTransaction.begin()
         SCNTransaction.animationDuration = 0.4
         SCNTransaction.animationTimingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
         cameraNode.position = initialCameraPosition
         cameraNode.look(at: orbitTarget)
+        SCNTransaction.commit()
+    }
+
+    // MARK: - 부위별 카메라 포커스
+    // 선택한 얼굴 부위를 화면 중심으로 이동 + 적절히 줌인
+    func focusOnRegion(_ region: FaceRegion) {
+        guard let cameraNode = cameraNode else { return }
+
+        let cx = scanData.meshCenter.x
+        let cy = scanData.meshCenter.y
+        let cz = scanData.meshCenter.z
+        let r  = scanData.meshRadius
+
+        // 부위별 Y 오프셋 (meshRadius 단위) + 줌 배율
+        let (yOffset, zoomFactor): (Float, Float) = {
+            switch region {
+            case .full:     return (0.0,   1.00)
+            case .forehead: return (0.65,  0.80)
+            case .eyebrow:  return (0.48,  0.80)
+            case .eye:      return (0.35,  0.75)
+            case .nose:     return (0.0,   0.85)
+            case .lip:      return (-0.25, 0.75)
+            case .cheek:    return (0.10,  0.88)
+            case .jaw:      return (-0.48, 0.80)
+            }
+        }()
+
+        let newTarget = SCNVector3(cx, cy + r * yOffset, cz)
+        let newDist   = r * 5.0 * zoomFactor
+
+        orbitAngleX  = 0
+        orbitAngleY  = 0
+        orbitTarget  = newTarget
+        orbitDistance = newDist
+
+        // ax=0, ay=0 → 정면 (x=0, y=0, z=dist)
+        let newPos = SCNVector3(newTarget.x, newTarget.y, newTarget.z + newDist)
+
+        SCNTransaction.begin()
+        SCNTransaction.animationDuration = 0.38
+        SCNTransaction.animationTimingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        cameraNode.position = newPos
+        cameraNode.look(at: newTarget)
         SCNTransaction.commit()
     }
 
